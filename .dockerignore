@@ -1,0 +1,16 @@
+**/node_modules
+**/dist
+**/.env
+**/.env.local
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.db-journal
+.git
+.gitignore
+.DS_Store
+.claude
+README.md
+fly.toml
+Dockerfile
+.dockerignore
