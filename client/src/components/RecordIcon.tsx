@@ -1,5 +1,5 @@
 import type { RecordType } from "../types";
-import { categories } from "../types";
+import { getCategory } from "../types";
 
 export function RecordIcon({
   type,
@@ -8,7 +8,7 @@ export function RecordIcon({
   type: RecordType;
   size?: number;
 }) {
-  const cat = categories[type];
+  const cat = getCategory(type);
   return (
     <div
       className="record-icon"

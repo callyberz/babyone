@@ -1,13 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { ParseResult, RecordType, RoutineRecord } from "./types.js";
+import type { ParseResult, RoutineRecord } from "./types.js";
 import { ruleBasedParse } from "./parser.js";
-import {
-  deleteRecord,
-  findRecords,
-  getRecord,
-  insertRecord,
-  updateRecord,
-} from "./db.js";
+import { findRecords, getRecord, insertRecord } from "./db.js";
+import { callMcpTool, getAnthropicToolSchemas } from "./mcp/client.js";
 
 const apiKey = process.env.ANTHROPIC_API_KEY;
 const client = apiKey ? new Anthropic({ apiKey }) : null;
@@ -21,223 +16,30 @@ You operate the parent's routine log via tools. Voice rules:
 - Match the parent's energy. Celebrate milestones. Don't be saccharine.
 
 Tools:
-- log_record — create a new routine entry. Use this when the parent describes something that happened ("fed 3oz at 2pm", "wet diaper", "nap 45 min"). One message can describe multiple events ("fed 3oz and changed a wet diaper") — call log_record once per event.
+- log_record — create a new routine entry. The "type" field is a short snake_case category you choose from what the parent said. Prefer the canonical types when they obviously fit (feed, sleep, diaper, meds, play, mood); otherwise invent a fitting short label (e.g. bath, tummy_time, doctor_visit, bottle_prep). One message can describe multiple events ("fed 3oz and changed a wet diaper") — call log_record once per event.
 - update_record — fix a recent entry. Use when the parent corrects themselves ("actually that nap was 50 min", "the feed was 4oz not 3"). Use the id from "today's logs" provided in the user message, or call find_records first.
-- delete_record — remove an entry. ONLY when the parent's intent is unambiguous ("scratch that", "delete the 2pm feed", "ignore the last log"). If they say something vague like "fix that" or "remove one", ASK which one in your reply text instead of calling the tool. After deleting, mention what you removed.
+- delete_record — remove an entry. ONLY when the parent's intent is unambiguous ("scratch that", "delete the 2pm feed"). After deleting, mention what you removed.
 - find_records — search older history. Use for questions like "what did he eat yesterday" or when you need to update/delete something not in today's logs.
 
-Behavior rules:
+When to ASK instead of acting (very important):
+If you are uncertain about ANY of the following, reply with one short clarifying question in plain text and DO NOT call log_record, update_record, or delete_record yet:
+- Ambiguous type: the parent's words don't clearly map to any sensible category (e.g. "we did the thing again", "the usual"). Ask what happened.
+- Missing required detail: type is clear but key fields are missing (e.g. "fed her" with no amount or duration → ask "how much" or "how long"; "nap" with no duration → ask roughly how long).
+- Ambiguous update/delete target: the parent says "fix that one", "remove one", or "the one earlier" and more than one recent record could match → ask which one (by time or title).
+
+Behaviour rules:
 - If the user is just chatting or asking a question, do not call any write tool. Reply in plain text.
 - For times, prefer the "now" timestamp the user provides; only set "at" yourself if the parent named a specific time.
-- After tool calls, your final text reply is what the parent sees — keep it conversational and acknowledge what you did ("got it — 3oz logged" / "fixed that nap to 50 min").
-- Never invent record ids. Use ids from today's-logs context or from find_records results.`;
+- After tool calls, your final text reply is what the parent sees — keep it conversational and acknowledge what you did ("got it — 3oz logged" / "fixed that nap to 50 min" / "logged a bath").
+- Never invent record ids. Use ids from today's-logs context or from find_records results.
+- CRITICAL: Never claim you logged, saved, updated, or deleted anything unless you actually called the corresponding tool (log_record / update_record / delete_record) in this same turn. If you didn't call the tool, do not say "got it", "logged", "saved", "noted", "done", "fixed", or "removed" — instead ask a clarifying question or explain what you need.`;
 
-interface ToolDef {
-  schema: Anthropic.Messages.Tool;
-  handler: (
-    input: unknown,
-    ctx: ToolCtx,
-  ) => Promise<{ result: unknown; isError?: boolean }>;
-}
-
-interface ToolCtx {
+interface ToolRunContext {
   now: Date;
   created: RoutineRecord[];
   updated: RoutineRecord[];
   deleted: number[];
 }
-
-const RECORD_TYPES: RecordType[] = [
-  "feed",
-  "sleep",
-  "diaper",
-  "meds",
-  "play",
-  "mood",
-];
-
-const tools: Record<string, ToolDef> = {
-  log_record: {
-    schema: {
-      name: "log_record",
-      description:
-        "Create a new routine entry for the baby. Call once per event — if the parent describes multiple things, call this multiple times.",
-      input_schema: {
-        type: "object",
-        properties: {
-          type: {
-            type: "string",
-            enum: RECORD_TYPES,
-            description: "The kind of routine entry.",
-          },
-          at: {
-            type: "string",
-            description:
-              "ISO-8601 timestamp the event happened. Omit to use now.",
-          },
-          title: {
-            type: "string",
-            description:
-              'Short human title (e.g. "Bottle — 3 oz", "Nap — 45 min", "Diaper — wet").',
-          },
-          detail: {
-            type: "string",
-            description: "Optional short detail string.",
-          },
-          meta: {
-            type: "object",
-            description:
-              "Type-specific metadata. feed: { volume_oz?, side? (left|right|both|bottle), mins? }. sleep: { mins, where? (bassinet|crib|stroller|contact) }. diaper: { kind: wet|dirty|both }. play: { mins }. mood: { kind: happy|fussy }. meds: { name?, dose? }.",
-            additionalProperties: true,
-          },
-        },
-        required: ["type", "title"],
-      },
-    },
-    handler: async (input, ctx) => {
-      const i = input as {
-        type: RecordType;
-        at?: string;
-        title: string;
-        detail?: string;
-        meta?: Record<string, unknown>;
-      };
-      const rec = insertRecord({
-        type: i.type,
-        at: i.at ?? ctx.now.toISOString(),
-        title: i.title,
-        detail: i.detail ?? "",
-        meta: i.meta ?? {},
-      });
-      ctx.created.push(rec);
-      return {
-        result: { id: rec.id, type: rec.type, at: rec.at, title: rec.title },
-      };
-    },
-  },
-
-  update_record: {
-    schema: {
-      name: "update_record",
-      description:
-        "Modify an existing routine entry. Provide id and any subset of fields to change. meta is shallow-merged with the existing meta.",
-      input_schema: {
-        type: "object",
-        properties: {
-          id: { type: "number", description: "Record id to update." },
-          type: { type: "string", enum: RECORD_TYPES },
-          at: { type: "string", description: "ISO-8601 timestamp." },
-          title: { type: "string" },
-          detail: { type: "string" },
-          meta: { type: "object", additionalProperties: true },
-        },
-        required: ["id"],
-      },
-    },
-    handler: async (input, ctx) => {
-      const i = input as {
-        id: number;
-        type?: RecordType;
-        at?: string;
-        title?: string;
-        detail?: string;
-        meta?: Record<string, unknown>;
-      };
-      const existing = getRecord(i.id);
-      if (!existing)
-        return {
-          result: `No record with id ${i.id}.`,
-          isError: true,
-        };
-      const merged: RoutineRecord = {
-        id: existing.id,
-        type: i.type ?? existing.type,
-        at: i.at ?? existing.at,
-        title: i.title ?? existing.title,
-        detail: i.detail ?? existing.detail,
-        meta: i.meta ? { ...existing.meta, ...i.meta } : existing.meta,
-      };
-      const saved = updateRecord(merged);
-      ctx.updated.push(saved);
-      return { result: { id: saved.id, title: saved.title, at: saved.at } };
-    },
-  },
-
-  delete_record: {
-    schema: {
-      name: "delete_record",
-      description:
-        "Permanently remove a routine entry. Only call when the parent's intent is unambiguous; otherwise ask them to clarify in your reply text.",
-      input_schema: {
-        type: "object",
-        properties: {
-          id: { type: "number", description: "Record id to delete." },
-        },
-        required: ["id"],
-      },
-    },
-    handler: async (input, ctx) => {
-      const i = input as { id: number };
-      const existing = getRecord(i.id);
-      if (!existing)
-        return { result: `No record with id ${i.id}.`, isError: true };
-      deleteRecord(i.id);
-      ctx.deleted.push(i.id);
-      return {
-        result: `Deleted #${i.id} (${existing.title}).`,
-      };
-    },
-  },
-
-  find_records: {
-    schema: {
-      name: "find_records",
-      description:
-        "Search recent routine entries. Use to look up older logs not already in the today's-logs context, or to answer questions about history.",
-      input_schema: {
-        type: "object",
-        properties: {
-          since: {
-            type: "string",
-            description: "ISO-8601 lower bound (inclusive).",
-          },
-          until: {
-            type: "string",
-            description: "ISO-8601 upper bound (inclusive).",
-          },
-          type: { type: "string", enum: RECORD_TYPES },
-          limit: { type: "number", description: "Max rows (default 20)." },
-        },
-      },
-    },
-    handler: async (input) => {
-      const i = input as {
-        since?: string;
-        until?: string;
-        type?: RecordType;
-        limit?: number;
-      };
-      const rows = findRecords({
-        since: i.since,
-        until: i.until,
-        type: i.type,
-        limit: i.limit,
-      });
-      return {
-        result: rows.map((r) => ({
-          id: r.id,
-          type: r.type,
-          at: r.at,
-          title: r.title,
-        })),
-      };
-    },
-  },
-};
-
-const TOOL_SCHEMAS: Anthropic.Messages.Tool[] = Object.values(tools).map(
-  (t) => t.schema,
-);
 
 function startOfToday(now: Date): Date {
   const d = new Date(now);
@@ -274,13 +76,64 @@ async function fallbackPath(text: string, now: Date): Promise<ParseResult> {
   };
 }
 
+function extractIdFromText(text: string): number | null {
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed.id === "number") return parsed.id;
+  } catch {
+    /* not JSON */
+  }
+  return null;
+}
+
+function trackToolEffect(
+  name: string,
+  args: Record<string, unknown>,
+  outcome: { text: string; isError: boolean },
+  ctx: ToolRunContext,
+): void {
+  if (outcome.isError) return;
+  if (name === "log_record") {
+    const id = extractIdFromText(outcome.text);
+    if (id != null) {
+      const rec = getRecord(id);
+      if (rec) ctx.created.push(rec);
+    }
+  } else if (name === "update_record") {
+    const id = extractIdFromText(outcome.text);
+    if (id != null) {
+      const rec = getRecord(id);
+      if (rec) ctx.updated.push(rec);
+    }
+  } else if (name === "delete_record") {
+    const argId = typeof args.id === "number" ? args.id : null;
+    if (argId != null) ctx.deleted.push(argId);
+  }
+}
+
 export async function llmParse(
   text: string,
   now = new Date(),
 ): Promise<ParseResult> {
   if (!client) return fallbackPath(text, now);
 
-  const ctx: ToolCtx = { now, created: [], updated: [], deleted: [] };
+  const ctx: ToolRunContext = { now, created: [], updated: [], deleted: [] };
+
+  let toolSchemas: Anthropic.Messages.Tool[];
+  try {
+    const raw = await getAnthropicToolSchemas();
+    toolSchemas = raw.map((t) => ({
+      name: t.name,
+      description: t.description,
+      input_schema: t.input_schema,
+    })) as Anthropic.Messages.Tool[];
+  } catch (err) {
+    console.warn(
+      "[llm] could not load MCP tool schemas, falling back to rule-based:",
+      (err as Error).message,
+    );
+    return fallbackPath(text, now);
+  }
 
   const firstUserContent = `now: ${now.toISOString()}\n${summariseTodaysRecords(now)}\nparent said: ${text}`;
   const messages: Anthropic.Messages.MessageParam[] = [
@@ -294,7 +147,7 @@ export async function llmParse(
         model: MODEL,
         max_tokens: 1024,
         system: SYSTEM,
-        tools: TOOL_SCHEMAS,
+        tools: toolSchemas,
         messages,
       });
 
@@ -305,6 +158,14 @@ export async function llmParse(
         .trim();
       if (textParts) finalText = textParts;
 
+      console.log(
+        "[llm] iter",
+        i,
+        "stop_reason:",
+        res.stop_reason,
+        "text:",
+        textParts.slice(0, 80),
+      );
       if (res.stop_reason !== "tool_use") break;
 
       const toolUses = res.content.filter(
@@ -322,24 +183,16 @@ export async function llmParse(
 
       const results: Anthropic.Messages.ToolResultBlockParam[] = [];
       for (const tu of toolUses) {
-        const tool = tools[tu.name];
-        if (!tool) {
-          results.push({
-            type: "tool_result",
-            tool_use_id: tu.id,
-            content: `Unknown tool: ${tu.name}`,
-            is_error: true,
-          });
-          continue;
-        }
+        const args = (tu.input ?? {}) as Record<string, unknown>;
+        console.log("[llm] tool_use:", tu.name, JSON.stringify(args));
         try {
-          const { result, isError } = await tool.handler(tu.input, ctx);
+          const outcome = await callMcpTool(tu.name, args);
+          trackToolEffect(tu.name, args, outcome, ctx);
           results.push({
             type: "tool_result",
             tool_use_id: tu.id,
-            content:
-              typeof result === "string" ? result : JSON.stringify(result),
-            is_error: isError,
+            content: outcome.text,
+            is_error: outcome.isError,
           });
         } catch (err) {
           results.push({

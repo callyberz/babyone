@@ -1,4 +1,3 @@
-import { useState } from "react";
 import type { RoutineRecord } from "../types";
 import { categories } from "../types";
 
@@ -13,8 +12,7 @@ interface Bucket {
 }
 
 export function TrendsScreen({ records }: { records: RoutineRecord[] }) {
-  const [range, setRange] = useState<"7d" | "14d">("7d");
-  const days = range === "7d" ? 7 : 14;
+  const days = 7;
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);

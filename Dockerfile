@@ -27,7 +27,6 @@ COPY --from=builder /app/package.json /app/package-lock.json /app/
 COPY --from=builder /app/node_modules /app/node_modules
 COPY --from=builder /app/server/package.json /app/server/package.json
 COPY --from=builder /app/server/dist /app/server/dist
-COPY --from=builder /app/server/node_modules /app/server/node_modules
 COPY --from=builder /app/client/package.json /app/client/package.json
 COPY --from=builder /app/client/dist /app/client/dist
 

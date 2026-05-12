@@ -1,4 +1,15 @@
-export type RecordType = "feed" | "sleep" | "diaper" | "meds" | "play" | "mood";
+export type RecordType = string;
+
+export const KNOWN_RECORD_TYPES = [
+  "feed",
+  "sleep",
+  "diaper",
+  "meds",
+  "play",
+  "mood",
+] as const;
+
+export type KnownRecordType = (typeof KNOWN_RECORD_TYPES)[number];
 
 export interface RecordMeta {
   volume_oz?: number;
@@ -40,7 +51,7 @@ export interface Category {
   tint: string;
 }
 
-export const categories: Record<RecordType, Category> = {
+export const categories: Record<KnownRecordType, Category> = {
   feed: { icon: "🍼", label: "Feeding", tint: "var(--cat-feed)" },
   sleep: { icon: "🌙", label: "Sleep", tint: "var(--cat-sleep)" },
   diaper: { icon: "💧", label: "Diaper", tint: "var(--cat-diaper)" },
@@ -48,3 +59,27 @@ export const categories: Record<RecordType, Category> = {
   play: { icon: "🧸", label: "Tummy time", tint: "var(--cat-play)" },
   mood: { icon: "🫧", label: "Mood", tint: "var(--cat-mood)" },
 };
+
+export const OTHER_CATEGORY: Category = {
+  icon: "✨",
+  label: "Other",
+  tint: "var(--cat-other, #94a3b8)",
+};
+
+export function getCategory(type: string): Category {
+  return (
+    (categories as Record<string, Category>)[type] ?? {
+      ...OTHER_CATEGORY,
+      label: prettifyTypeLabel(type),
+    }
+  );
+}
+
+function prettifyTypeLabel(type: string): string {
+  if (!type) return OTHER_CATEGORY.label;
+  return type
+    .split("_")
+    .filter(Boolean)
+    .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+    .join(" ");
+}

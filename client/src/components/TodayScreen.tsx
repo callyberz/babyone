@@ -1,6 +1,6 @@
 import { useState } from "react";
-import type { RecordType, RoutineRecord } from "../types";
-import { categories } from "../types";
+import type { RecordType, RoutineRecord, KnownRecordType } from "../types";
+import { categories, getCategory } from "../types";
 import { fmtDay, fmtTime } from "../utils";
 
 type Filter = "all" | RecordType;
@@ -31,8 +31,8 @@ export function TodayScreen({
     ["all", "All"],
     ...(
       Object.entries(categories) as [
-        RecordType,
-        (typeof categories)[RecordType],
+        KnownRecordType,
+        (typeof categories)[KnownRecordType],
       ][]
     ).map(([k, v]) => [k, v.label] as [Filter, string]),
   ];
@@ -48,7 +48,7 @@ export function TodayScreen({
           >
             {k !== "all" && (
               <span style={{ marginRight: 6 }}>
-                {categories[k as RecordType].icon}
+                {categories[k as KnownRecordType].icon}
               </span>
             )}
             {label}
@@ -60,7 +60,7 @@ export function TodayScreen({
           <div className="section-h">{g.label}</div>
           <div className="tl">
             {g.items.map((r) => {
-              const cat = categories[r.type];
+              const cat = getCategory(r.type);
               return (
                 <div className="tl-item" key={r.id}>
                   <div className="tl-dot" style={{ borderColor: cat.tint }} />

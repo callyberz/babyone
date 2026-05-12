@@ -1,5 +1,5 @@
 import type { RecordType, RoutineRecord } from "../types";
-import { categories } from "../types";
+import { categories, getCategory } from "../types";
 import { fmtAgo, fmtTime } from "../utils";
 import { Icon } from "./icons";
 import type { View } from "./views";
@@ -149,7 +149,7 @@ export function DashScreen({
           <div className="next-up">
             {[lastFeed, lastSleep, lastDiaper].filter(Boolean).map((r) => {
               const rec = r as RoutineRecord;
-              const cat = categories[rec.type];
+              const cat = getCategory(rec.type);
               return (
                 <div className="next-up-row" key={rec.id}>
                   <div

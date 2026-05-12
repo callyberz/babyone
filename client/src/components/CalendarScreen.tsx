@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { RecordType, RoutineRecord } from "../types";
-import { categories } from "../types";
+import { getCategory } from "../types";
 import { fmtDay, fmtTime } from "../utils";
 import { Icon } from "./icons";
 
@@ -141,7 +141,7 @@ export function CalendarScreen({
                     style={{
                       background: isToday
                         ? "var(--accent-ink)"
-                        : categories[t].tint,
+                        : getCategory(t).tint,
                     }}
                   />
                 ))}
@@ -165,19 +165,22 @@ export function CalendarScreen({
             gap: 10,
           }}
         >
-          {Object.entries(sumByType).map(([t, n]) => (
-            <div className="stat-card" key={t}>
-              <div className="lbl">
-                <span
-                  className="stat-swatch"
-                  style={{ background: categories[t as RecordType].tint }}
-                />{" "}
-                {categories[t as RecordType].label}
+          {Object.entries(sumByType).map(([t, n]) => {
+            const cat = getCategory(t);
+            return (
+              <div className="stat-card" key={t}>
+                <div className="lbl">
+                  <span
+                    className="stat-swatch"
+                    style={{ background: cat.tint }}
+                  />{" "}
+                  {cat.label}
+                </div>
+                <div className="val">{n}</div>
+                <div className="sub">{n === 1 ? "entry" : "entries"}</div>
               </div>
-              <div className="val">{n}</div>
-              <div className="sub">{n === 1 ? "entry" : "entries"}</div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -186,7 +189,7 @@ export function CalendarScreen({
           <div className="section-h">Entries</div>
           <div className="tl">
             {sel.map((r) => {
-              const cat = categories[r.type];
+              const cat = getCategory(r.type);
               return (
                 <div className="tl-item" key={r.id}>
                   <div className="tl-dot" style={{ borderColor: cat.tint }} />

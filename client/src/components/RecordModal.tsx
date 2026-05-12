@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { RoutineRecord } from "../types";
-import { categories } from "../types";
+import { getCategory } from "../types";
 import { Icon } from "./icons";
 
 export function RecordModal({
@@ -15,7 +15,7 @@ export function RecordModal({
   onDelete: (id: number) => void;
 }) {
   const [draft, setDraft] = useState<RoutineRecord>({ ...record });
-  const cat = categories[draft.type];
+  const cat = getCategory(draft.type);
 
   const setField = <K extends keyof RoutineRecord>(k: K, v: RoutineRecord[K]) =>
     setDraft((d) => ({ ...d, [k]: v }));
