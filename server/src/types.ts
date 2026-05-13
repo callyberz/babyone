@@ -44,6 +44,13 @@ export interface ParseResult {
   deleted: number[];
 }
 
+export interface Baby {
+  name: string;
+  birthdate: string; // ISO date "YYYY-MM-DD"
+  weightValue: number; // > 0, finite
+  weightUnit: "lb" | "kg";
+}
+
 export function normaliseRecordType(input: unknown): string {
   if (typeof input !== "string") return "";
   return input
