@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type ChatResult } from "../api";
 import type { ChatMessage, RoutineRecord } from "../types";
-import { fmtAgo, fmtDay, fmtTime } from "../utils";
+import { fmtAgo, fmtDay, fmtTime, formatTimezone } from "../utils";
 import { Icon } from "./icons";
 import { RecordIcon } from "./RecordIcon";
 
@@ -27,13 +27,63 @@ export function ChatScreen({
 }) {
   const [draft, setDraft] = useState("");
   const [typing, setTyping] = useState(false);
+  const [pillLabel, setPillLabel] = useState<string | null>(null);
+  const [pillVisible, setPillVisible] = useState(false);
   const streamRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const scrollStopRef = useRef<number | null>(null);
+  const activeIsTodayRef = useRef(true);
 
   useEffect(() => {
     if (streamRef.current)
       streamRef.current.scrollTop = streamRef.current.scrollHeight;
   }, [chat, typing]);
+
+  useEffect(() => {
+    const stream = streamRef.current;
+    if (!stream) return;
+
+    const isSameDay = (a: Date, b: Date) =>
+      a.getFullYear() === b.getFullYear() &&
+      a.getMonth() === b.getMonth() &&
+      a.getDate() === b.getDate();
+
+    const onScroll = () => {
+      const streamTop = stream.getBoundingClientRect().top;
+      const nodes = stream.querySelectorAll<HTMLElement>("[data-at]");
+      let activeAt: string | null = null;
+      for (const node of nodes) {
+        if (node.getBoundingClientRect().bottom > streamTop) {
+          activeAt = node.dataset.at ?? null;
+          break;
+        }
+      }
+      if (!activeAt && nodes.length > 0) {
+        activeAt = nodes[nodes.length - 1]!.dataset.at ?? null;
+      }
+      if (!activeAt) return;
+
+      const d = new Date(activeAt);
+      activeIsTodayRef.current = isSameDay(d, new Date());
+      setPillLabel(`${fmtDay(activeAt)} · ${formatTimezone(activeAt)}`);
+      setPillVisible(true);
+
+      if (scrollStopRef.current !== null) {
+        window.clearTimeout(scrollStopRef.current);
+      }
+      scrollStopRef.current = window.setTimeout(() => {
+        if (activeIsTodayRef.current) setPillVisible(false);
+      }, 1200);
+    };
+
+    stream.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      stream.removeEventListener("scroll", onScroll);
+      if (scrollStopRef.current !== null) {
+        window.clearTimeout(scrollStopRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (taRef.current) {
@@ -116,6 +166,12 @@ export function ChatScreen({
 
   return (
     <div className="chat-wrap">
+      <div
+        className={`chat-date-pill${pillVisible ? " is-visible" : ""}`}
+        aria-hidden={!pillVisible}
+      >
+        {pillLabel ?? ""}
+      </div>
       <div className="chat-stream" ref={streamRef}>
         {grouped.map((g) =>
           g.kind === "day" ? (
@@ -183,7 +239,7 @@ function ChatBubble({
   recById: Map<number, RoutineRecord>;
 }) {
   return (
-    <div className={`msg ${m.from}`}>
+    <div className={`msg ${m.from}`} data-at={m.at}>
       <div className={`msg-avatar ${m.from}`}>
         {m.from === "bot" ? "c" : "M"}
       </div>

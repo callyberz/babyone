@@ -396,6 +396,33 @@ button:focus-visible {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  position: relative;
+}
+.chat-date-pill {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-4px);
+  z-index: 5;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-elev) 80%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--line-2);
+  color: var(--ink-2);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition:
+    opacity 200ms ease,
+    transform 200ms ease;
+}
+.chat-date-pill.is-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
 }
 .chat-stream {
   flex: 1;

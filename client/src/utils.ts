@@ -15,6 +15,14 @@ export const fmtAgo = (s: string | Date) => {
   return `${Math.floor(h / 24)}d ago`;
 };
 
+export const formatTimezone = (s?: string | Date) => {
+  const d = s ? toDate(s) : new Date();
+  const parts = new Intl.DateTimeFormat([], {
+    timeZoneName: "long",
+  }).formatToParts(d);
+  return parts.find((p) => p.type === "timeZoneName")?.value ?? "";
+};
+
 export const fmtDay = (s: string | Date) => {
   const d = toDate(s);
   const today = new Date();
