@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type {
+  Baby,
   ChatMessage,
   RoutineRecord,
   RecordMeta,
@@ -168,4 +169,19 @@ export const markSeeded = (): void => {
     "seeded",
     "1",
   );
+};
+
+export const getBaby = (): Baby | null => {
+  const row = db.prepare("SELECT v FROM kv WHERE k=?").get("baby") as
+    | { v: string }
+    | undefined;
+  return row ? (JSON.parse(row.v) as Baby) : null;
+};
+
+export const setBaby = (b: Baby): Baby => {
+  db.prepare("INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)").run(
+    "baby",
+    JSON.stringify(b),
+  );
+  return b;
 };
