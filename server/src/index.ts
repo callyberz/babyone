@@ -4,15 +4,17 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import {
   deleteRecord,
+  getBaby,
   insertMessage,
   insertRecord,
   listMessages,
   listRecords,
+  setBaby,
   updateRecord,
 } from "./db.js";
 import { seedIfEmpty } from "./seed.js";
 import { llmEnabled, llmParse } from "./llm.js";
-import type { RoutineRecord } from "./types.js";
+import type { Baby, RoutineRecord } from "./types.js";
 
 seedIfEmpty();
 
@@ -21,13 +23,48 @@ app.use("/api/*", cors());
 
 app.get("/api/health", (c) => c.json({ ok: true, llm: llmEnabled }));
 
-app.get("/api/baby", (c) =>
-  c.json({
-    name: "Clement",
-    age: "18 days",
-    weight: "7.4 lb",
-  }),
-);
+app.get("/api/baby", (c) => {
+  const b = getBaby();
+  if (!b) return c.json({ error: "baby not seeded" }, 500);
+  return c.json(b);
+});
+
+const isValidIsoDate = (s: string): boolean =>
+  /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(new Date(s).getTime());
+
+const validateBaby = (b: Partial<Baby>): string | null => {
+  if (typeof b.name !== "string" || !b.name.trim()) return "name required";
+  if (b.name.trim().length > 60) return "name too long";
+  if (typeof b.birthdate !== "string" || !isValidIsoDate(b.birthdate))
+    return "birthdate must be YYYY-MM-DD";
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (new Date(b.birthdate).getTime() > today.getTime())
+    return "birthdate cannot be in the future";
+  if (
+    typeof b.weightValue !== "number" ||
+    !Number.isFinite(b.weightValue) ||
+    b.weightValue <= 0 ||
+    b.weightValue >= 1000
+  )
+    return "weightValue must be a positive number under 1000";
+  if (b.weightUnit !== "lb" && b.weightUnit !== "kg")
+    return "weightUnit must be 'lb' or 'kg'";
+  return null;
+};
+
+app.put("/api/baby", async (c) => {
+  const body = (await c.req.json()) as Partial<Baby>;
+  const err = validateBaby(body);
+  if (err) return c.json({ error: err }, 400);
+  const saved = setBaby({
+    name: body.name!.trim(),
+    birthdate: body.birthdate!,
+    weightValue: body.weightValue!,
+    weightUnit: body.weightUnit!,
+  });
+  return c.json(saved);
+});
 
 app.get("/api/records", (c) => c.json(listRecords()));
 
