@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type ChatResult } from "./api";
 import type { Baby, ChatMessage, RoutineRecord } from "./types";
+import { BabyProfileModal } from "./components/BabyProfileModal";
 import { CalendarScreen } from "./components/CalendarScreen";
 import { ChatScreen } from "./components/ChatScreen";
 import { DashScreen } from "./components/DashScreen";
@@ -43,6 +44,7 @@ export function App() {
   const [chat, setChat] = useState<ChatMessage[]>([]);
   const [baby, setBaby] = useState<Baby | null>(null);
   const [editing, setEditing] = useState<RoutineRecord | null>(null);
+  const [editingBaby, setEditingBaby] = useState(false);
   const [loadErr, setLoadErr] = useState<string | null>(null);
 
   useEffect(() => {
@@ -90,6 +92,10 @@ export function App() {
     setRecords((rs) => rs.filter((r) => r.id !== id));
     setEditing(null);
   };
+  const updateBaby = async (b: Baby) => {
+    const saved = await api.updateBaby(b);
+    setBaby(saved);
+  };
 
   return (
     <div className="app">
@@ -99,6 +105,7 @@ export function App() {
         theme={theme}
         setTheme={setTheme}
         baby={baby}
+        onEditBaby={() => setEditingBaby(true)}
       />
       <main className="main">
         <header className="topbar">
@@ -147,6 +154,13 @@ export function App() {
           onClose={() => setEditing(null)}
           onSave={updateRecord}
           onDelete={deleteRecord}
+        />
+      )}
+      {editingBaby && baby && (
+        <BabyProfileModal
+          baby={baby}
+          onClose={() => setEditingBaby(false)}
+          onSave={updateBaby}
         />
       )}
     </div>

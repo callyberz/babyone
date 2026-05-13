@@ -41,8 +41,9 @@ export interface ChatMessage {
 
 export interface Baby {
   name: string;
-  age: string;
-  weight: string;
+  birthdate: string; // ISO date "YYYY-MM-DD"
+  weightValue: number;
+  weightUnit: "lb" | "kg";
 }
 
 export interface Category {

@@ -1,4 +1,5 @@
 import type { Baby } from "../types";
+import { formatBabyAge, formatBabyWeight } from "../utils";
 import { Icon } from "./icons";
 import type { View } from "./views";
 
@@ -20,12 +21,14 @@ export function Sidebar({
   theme,
   setTheme,
   baby,
+  onEditBaby,
 }: {
   view: View;
   setView: (v: View) => void;
   theme: "light" | "dark";
   setTheme: (t: "light" | "dark") => void;
   baby: Baby | null;
+  onEditBaby: () => void;
 }) {
   return (
     <aside className="sidebar">
@@ -37,15 +40,23 @@ export function Sidebar({
         </div>
       </div>
 
-      <div className="baby-card">
+      <button
+        type="button"
+        className="baby-card baby-card-button"
+        onClick={onEditBaby}
+        aria-label="Edit baby profile"
+      >
         <div className="baby-avatar">{baby?.name?.[0] ?? "C"}</div>
-        <div>
+        <div className="baby-card-text">
           <div className="baby-name">{baby?.name ?? "Clement"}</div>
           <div className="baby-age">
-            {baby ? `${baby.age} old · ${baby.weight}` : "—"}
+            {baby
+              ? `${formatBabyAge(baby.birthdate)} old · ${formatBabyWeight(baby)}`
+              : "—"}
           </div>
         </div>
-      </div>
+        <Icon.pencil className="baby-card-edit" />
+      </button>
 
       <nav className="nav">
         <div className="nav-label">Workspace</div>

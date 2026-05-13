@@ -1129,3 +1129,43 @@ button:focus-visible {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+.baby-card-button {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: relative;
+  font: inherit;
+  color: inherit;
+}
+
+.baby-card-button:hover,
+.baby-card-button:focus-visible {
+  background: var(--surface-hover, rgba(127, 127, 127, 0.08));
+  border-radius: 12px;
+  outline: none;
+}
+
+.baby-card-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.baby-card-edit {
+  width: 16px;
+  height: 16px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  color: var(--muted, #94a3b8);
+}
+
+.baby-card-button:hover .baby-card-edit,
+.baby-card-button:focus-visible .baby-card-edit {
+  opacity: 1;
+}

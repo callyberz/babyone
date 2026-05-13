@@ -7,6 +7,12 @@ const json = async <T>(r: Response): Promise<T> => {
 
 export const api = {
   baby: () => fetch("/api/baby").then((r) => json<Baby>(r)),
+  updateBaby: (b: Baby) =>
+    fetch("/api/baby", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(b),
+    }).then((r) => json<Baby>(r)),
   listRecords: () =>
     fetch("/api/records").then((r) => json<RoutineRecord[]>(r)),
   updateRecord: (rec: RoutineRecord) =>

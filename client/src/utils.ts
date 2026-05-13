@@ -38,3 +38,41 @@ export const fmtDay = (s: string | Date) => {
     day: "numeric",
   });
 };
+
+export const formatBabyAge = (
+  birthdate: string,
+  now: Date = new Date(),
+): string => {
+  const birth = new Date(`${birthdate}T00:00:00`);
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  birth.setHours(0, 0, 0, 0);
+  const days = Math.max(
+    0,
+    Math.round((today.getTime() - birth.getTime()) / 86400000),
+  );
+
+  if (days === 0) return "newborn";
+  if (days < 30) return `${days} day${days === 1 ? "" : "s"}`;
+
+  if (days < 365) {
+    const weeks = Math.floor(days / 7);
+    if (weeks < 9) return `${weeks} week${weeks === 1 ? "" : "s"}`;
+    const months = Math.floor(days / 30.44);
+    return `${months} month${months === 1 ? "" : "s"}`;
+  }
+
+  const years = Math.floor(days / 365.25);
+  const remainingDays = days - Math.floor(years * 365.25);
+  const months = Math.floor(remainingDays / 30.44);
+  if (months === 0) return `${years} year${years === 1 ? "" : "s"}`;
+  return `${years} year${years === 1 ? "" : "s"} ${months} month${months === 1 ? "" : "s"}`;
+};
+
+export const formatBabyWeight = (b: {
+  weightValue: number;
+  weightUnit: "lb" | "kg";
+}): string => {
+  const v = Number(b.weightValue.toFixed(2));
+  return `${v} ${b.weightUnit}`;
+};
