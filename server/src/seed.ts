@@ -1,5 +1,12 @@
-import { insertMessage, insertRecord, isSeeded, markSeeded } from "./db.js";
-import type { RoutineRecord } from "./types.js";
+import {
+  getBaby,
+  insertMessage,
+  insertRecord,
+  isSeeded,
+  markSeeded,
+  setBaby,
+} from "./db.js";
+import type { Baby, RoutineRecord } from "./types.js";
 
 const now = () => new Date();
 const hoursAgo = (h: number, m = 0) => {
@@ -10,6 +17,19 @@ const hoursAgo = (h: number, m = 0) => {
 };
 
 export function seedIfEmpty(): void {
+  if (!getBaby()) {
+    const today = new Date();
+    const birth = new Date(today);
+    birth.setDate(birth.getDate() - 18);
+    const birthdate = birth.toISOString().slice(0, 10);
+    const defaultBaby: Baby = {
+      name: "Clement",
+      birthdate,
+      weightValue: 7.4,
+      weightUnit: "lb",
+    };
+    setBaby(defaultBaby);
+  }
   if (isSeeded()) return;
 
   const recs: Omit<RoutineRecord, "id">[] = [
