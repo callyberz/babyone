@@ -29,8 +29,14 @@ app.get("/api/baby", (c) => {
   return c.json(b);
 });
 
-const isValidIsoDate = (s: string): boolean =>
-  /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(new Date(s).getTime());
+const isValidIsoDate = (s: string): boolean => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const [y, m, d] = s.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  return (
+    dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d
+  );
+};
 
 const validateBaby = (b: Partial<Baby>): string | null => {
   if (typeof b.name !== "string" || !b.name.trim()) return "name required";
@@ -39,7 +45,7 @@ const validateBaby = (b: Partial<Baby>): string | null => {
     return "birthdate must be YYYY-MM-DD";
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  if (new Date(b.birthdate).getTime() > today.getTime())
+  if (new Date(`${b.birthdate}T00:00:00`).getTime() > today.getTime())
     return "birthdate cannot be in the future";
   if (
     typeof b.weightValue !== "number" ||

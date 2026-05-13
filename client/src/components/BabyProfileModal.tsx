@@ -2,11 +2,19 @@ import { useState } from "react";
 import type { Baby } from "../types";
 import { Icon } from "./icons";
 
+const isValidCalendarDate = (s: string): boolean => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const [y, m, d] = s.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  return (
+    dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d
+  );
+};
+
 const validate = (b: Baby): string | null => {
   if (!b.name.trim()) return "Name is required";
   if (b.name.trim().length > 60) return "Name is too long";
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(b.birthdate))
-    return "Birthdate must be a date";
+  if (!isValidCalendarDate(b.birthdate)) return "Birthdate must be a date";
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   if (new Date(`${b.birthdate}T00:00:00`).getTime() > today.getTime())
@@ -125,7 +133,7 @@ export function BabyProfileModal({
           <button
             className="btn btn-primary"
             onClick={onSubmit}
-            disabled={saving}
+            disabled={saving || validate(draft) !== null}
           >
             {saving ? "Saving…" : "Save"}
           </button>
