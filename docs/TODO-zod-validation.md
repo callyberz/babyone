@@ -24,21 +24,21 @@ Goal: a single source of truth for every payload schema, shared between server a
 
 ## Concrete migration steps
 
-- [ ] Decide on workspace layout for shared schemas (recommend: new `shared/` workspace, `"shared/*"` glob, both server and client depend on it).
-- [ ] Add `zod` to the shared workspace.
-- [ ] Port `Baby` first as the smallest, fully-typed case. Verify both server and client compile against `z.infer<typeof BabySchema>`.
-- [ ] Add a Hono validation middleware. Apply to `PUT /api/baby` first; confirm 400 responses include a useful error payload (consider `error.flatten()`).
-- [ ] Replace `BabyProfileModal`'s `validate` with `BabySchema.safeParse(draft)`.
-- [ ] Port `RoutineRecord` + `RecordMeta` (server `POST /api/records`, `PUT /api/records/:id`; client `RecordModal`).
-- [ ] Port `ChatMessage` request body (`/api/chat`).
-- [ ] Decide if/how to validate LLM-derived `ParseResult` (it's machine-generated; runtime validation actually has high value here).
-- [ ] Delete the leftover hand-rolled validators (`validateBaby`, `isValidIsoDate`, `isValidCalendarDate`, etc.).
+- [x] Workspace layout: new `@babyone/shared` npm workspace, single `src/index.ts`, `main`/`types` point at the TS source — tsx, vite, tsc (Bundler resolution), and Node 22+ type-stripping all resolve it with no separate build step.
+- [x] `zod` added to the shared workspace; server and client depend on it transitively via `@babyone/shared`.
+- [x] Port `Baby` — `BabyInputSchema` (wire) + `BabySchema` (canonical with trim). Both server and client compile against `z.infer<typeof BabySchema>`; `Baby` re-exported from each `types.ts`.
+- [x] Validation helper `validateBody(c, schema)` returns `{ok, data}` or `{ok: false, response}` with `{ error, details: error.flatten() }` envelope. Applied to `PUT /api/baby`, `POST /api/records`, `PUT /api/records/:id`, `POST /api/chat`. (Helper, not Hono middleware — keeps handler-local typing simple; revisit if more endpoints arrive.)
+- [x] Replace `BabyProfileModal`'s `validate` with `BabyInputSchema.safeParse(draft)`.
+- [x] Port `RoutineRecord` + `RecordMeta`. `RecordMetaSchema` uses `.passthrough()` to preserve LLM/MCP-injected extra keys (matches the previous `[k: string]: unknown`). Free-form `type` (min length 1) preserved. `at` validated as ISO 8601 datetime. Applied at `POST /api/records` and `PUT /api/records/:id`.
+- [x] Port `ChatMessage` + `ChatRequestSchema`. `POST /api/chat` validates `{text: string}` body.
+- [x] `ParseResultSchema` defined in shared (so the type is consistent across server/client). Not validated at runtime: it is constructed server-side from records that were already validated at write time (and from tool calls validated by the MCP tool input schemas). Validating it again would catch no real failure.
+- [x] Hand-rolled validators deleted: `validateBaby`, `isValidIsoDate`, `isValidCalendarDate`. No record/chat validators existed to remove.
 
-## Open questions
+## Resolved decisions
 
-- Do we want a single error format across endpoints? (Recommend `{ error: string, details?: ZodFlattenedError }`.)
-- Where should Zod live for the client's bundle size? Tree-shaking should make it fine; verify the dist size doesn't regress meaningfully.
-- For dates: store as ISO date string and let Zod parse with `.refine`, or move to `z.coerce.date()` + ISO serialisation on write? (Probably the former, to keep the SQLite JSON blob shape unchanged.)
+- **Error format:** `{ error: string, details: ZodFlattenedError }` on 400. `error` is the first issue's message for simple consumers; `details` carries the full flatten() output for field-level UI mapping.
+- **Bundle size:** client gzipped JS went from ~50 kB to ~67 kB (+17 kB gzipped) for zod. Acceptable. Re-check if it grows further.
+- **Dates:** kept as ISO strings (`YYYY-MM-DD` for birthdate, full ISO 8601 for `at`) and validated with regex + `.refine` / `z.string().datetime()`. SQLite JSON blob shape unchanged.
 
 ## Out of scope (do NOT bundle into this migration)
 

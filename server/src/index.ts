@@ -14,7 +14,32 @@ import {
 } from "./db.js";
 import { seedIfEmpty } from "./seed.js";
 import { llmEnabled, llmParse } from "./llm.js";
-import type { Baby, RoutineRecord } from "./types.js";
+import {
+  BabyInputSchema,
+  ChatRequestSchema,
+  RoutineRecordInputSchema,
+} from "@babyone/shared";
+import type { Context } from "hono";
+import type { ZodSchema } from "zod";
+
+const validateBody = async <T>(
+  c: Context,
+  schema: ZodSchema<T>,
+): Promise<{ ok: true; data: T } | { ok: false; response: Response }> => {
+  const body = await c.req.json().catch(() => null);
+  const parsed = schema.safeParse(body);
+  if (parsed.success) return { ok: true, data: parsed.data };
+  return {
+    ok: false,
+    response: c.json(
+      {
+        error: parsed.error.issues[0]?.message ?? "invalid payload",
+        details: parsed.error.flatten(),
+      },
+      400,
+    ),
+  };
+};
 
 seedIfEmpty();
 
@@ -29,60 +54,26 @@ app.get("/api/baby", (c) => {
   return c.json(b);
 });
 
-const isValidIsoDate = (s: string): boolean => {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
-  const [y, m, d] = s.split("-").map(Number);
-  const dt = new Date(y, m - 1, d);
-  return (
-    dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d
-  );
-};
-
-const validateBaby = (b: Partial<Baby>): string | null => {
-  if (typeof b.name !== "string" || !b.name.trim()) return "name required";
-  if (b.name.trim().length > 60) return "name too long";
-  if (typeof b.birthdate !== "string" || !isValidIsoDate(b.birthdate))
-    return "birthdate must be YYYY-MM-DD";
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  if (new Date(`${b.birthdate}T00:00:00`).getTime() > today.getTime())
-    return "birthdate cannot be in the future";
-  if (
-    typeof b.weightValue !== "number" ||
-    !Number.isFinite(b.weightValue) ||
-    b.weightValue <= 0 ||
-    b.weightValue >= 1000
-  )
-    return "weightValue must be a positive number under 1000";
-  if (b.weightUnit !== "lb" && b.weightUnit !== "kg")
-    return "weightUnit must be 'lb' or 'kg'";
-  return null;
-};
-
 app.put("/api/baby", async (c) => {
-  const body = (await c.req.json()) as Partial<Baby>;
-  const err = validateBaby(body);
-  if (err) return c.json({ error: err }, 400);
-  const saved = setBaby({
-    name: body.name!.trim(),
-    birthdate: body.birthdate!,
-    weightValue: body.weightValue!,
-    weightUnit: body.weightUnit!,
-  });
+  const v = await validateBody(c, BabyInputSchema);
+  if (!v.ok) return v.response;
+  const saved = setBaby({ ...v.data, name: v.data.name.trim() });
   return c.json(saved);
 });
 
 app.get("/api/records", (c) => c.json(listRecords()));
 
 app.post("/api/records", async (c) => {
-  const body = (await c.req.json()) as Omit<RoutineRecord, "id">;
-  return c.json(insertRecord(body));
+  const v = await validateBody(c, RoutineRecordInputSchema);
+  if (!v.ok) return v.response;
+  return c.json(insertRecord(v.data));
 });
 
 app.put("/api/records/:id", async (c) => {
   const id = Number(c.req.param("id"));
-  const body = (await c.req.json()) as Omit<RoutineRecord, "id">;
-  return c.json(updateRecord({ ...body, id }));
+  const v = await validateBody(c, RoutineRecordInputSchema);
+  if (!v.ok) return v.response;
+  return c.json(updateRecord({ ...v.data, id }));
 });
 
 app.delete("/api/records/:id", (c) => {
@@ -93,7 +84,9 @@ app.delete("/api/records/:id", (c) => {
 app.get("/api/messages", (c) => c.json(listMessages()));
 
 app.post("/api/chat", async (c) => {
-  const { text } = (await c.req.json()) as { text: string };
+  const v = await validateBody(c, ChatRequestSchema);
+  if (!v.ok) return v.response;
+  const { text } = v.data;
   const now = new Date();
 
   const userMsg = insertMessage({

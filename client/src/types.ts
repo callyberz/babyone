@@ -11,40 +11,12 @@ export const KNOWN_RECORD_TYPES = [
 
 export type KnownRecordType = (typeof KNOWN_RECORD_TYPES)[number];
 
-export interface RecordMeta {
-  volume_oz?: number;
-  side?: "left" | "right" | "both" | "bottle";
-  mins?: number;
-  where?: string | null;
-  kind?: "wet" | "dirty" | "both" | "fussy" | "happy";
-  name?: string;
-  dose?: string;
-  [k: string]: unknown;
-}
-
-export interface RoutineRecord {
-  id: number;
-  type: RecordType;
-  at: string;
-  title: string;
-  detail: string;
-  meta: RecordMeta;
-}
-
-export interface ChatMessage {
-  id: number;
-  from: "user" | "bot";
-  at: string;
-  text: string;
-  recordIds: number[];
-}
-
-export interface Baby {
-  name: string;
-  birthdate: string; // ISO date "YYYY-MM-DD"
-  weightValue: number;
-  weightUnit: "lb" | "kg";
-}
+export type {
+  Baby,
+  ChatMessage,
+  RecordMeta,
+  RoutineRecord,
+} from "@babyone/shared";
 
 export interface Category {
   icon: string;

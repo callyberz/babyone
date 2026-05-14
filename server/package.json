@@ -10,10 +10,12 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.1",
+    "@babyone/shared": "*",
     "@hono/node-server": "^1.13.7",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^11.5.0",
-    "hono": "^4.6.13"
+    "hono": "^4.6.13",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
