@@ -8,6 +8,7 @@ A calm, sage-toned app for tracking a newborn's daily routines via an LLM chat.
 - **Server**: Hono on Node
 - **Storage**: SQLite (better-sqlite3)
 - **LLM**: Anthropic Claude (Sonnet) for natural-language intake — falls back to a deterministic rule-based parser when `ANTHROPIC_API_KEY` is not set
+- **MCP**: Server-side Model Context Protocol integration for tool-driven record entry
 
 ## Running
 
@@ -22,15 +23,35 @@ npm run dev
 
 The client proxies `/api/*` to the server.
 
+## Build & start (production)
+
+```bash
+npm run build
+npm run start
+```
+
+The server serves the built client from its static root in production.
+
+## Deployment
+
+Containerized via `Dockerfile` and deployed to Fly.io (`fly.toml`). See [`DEPLOY.md`](./DEPLOY.md) for details.
+
 ## Project layout
 
 ```
 server/                  Hono + SQLite + LLM proxy
-  src/index.ts           Routes
-  src/db.ts              SQLite schema + seed
+  src/index.ts           Routes (health, baby, records, messages, chat)
+  src/db.ts              SQLite schema + kv helpers
+  src/seed.ts            Default baby seed
   src/llm.ts             Claude-backed parser (rule-based fallback)
+  src/parser.ts          Rule-based fallback parser
+  src/types.ts           Shared server types
+  src/mcp/               MCP server + client wiring
 client/                  Vite + React + TS
   src/App.tsx
   src/components/        Screens (Chat, Today, Dashboard, Trends, Calendar, Modal)
   src/styles.css         Ported from the design prototype
+Dockerfile, fly.toml     Container + Fly.io deploy config
+DEPLOY.md                Deployment runbook
+docs/                    Specs and implementation plans
 ```
