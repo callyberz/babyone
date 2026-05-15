@@ -156,6 +156,17 @@ export const insertMessage = (m: Omit<ChatMessage, "id">): ChatMessage => {
   return { ...m, id: Number(info.lastInsertRowid) };
 };
 
+export const getKv = (k: string): string | null => {
+  const row = db.prepare("SELECT v FROM kv WHERE k=?").get(k) as
+    | { v: string }
+    | undefined;
+  return row?.v ?? null;
+};
+
+export const setKv = (k: string, v: string): void => {
+  db.prepare("INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)").run(k, v);
+};
+
 export const isSeeded = (): boolean => {
   const row = db.prepare("SELECT v FROM kv WHERE k=?").get("seeded") as
     | { v: string }

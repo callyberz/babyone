@@ -61,6 +61,17 @@ export function App() {
         setRecords(sortRecords(rs));
         setChat(ms);
         setBaby(b);
+        // Best-effort daily brief — runs after the initial chat load so it
+        // appends rather than racing the setChat(ms) above. Never blocks the app.
+        api
+          .brief()
+          .then((res) => {
+            if (!cancel && res.message) {
+              const m = res.message;
+              setChat((c) => [...c, m]);
+            }
+          })
+          .catch(() => {});
       })
       .catch((err) => !cancel && setLoadErr((err as Error).message));
     return () => {

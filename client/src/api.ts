@@ -21,6 +21,15 @@ export const api = {
     ),
   listMessages: () =>
     fetch("/api/messages").then((r) => json<ChatMessage[]>(r)),
+  brief: () =>
+    fetch("/api/brief/today", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        localDate: new Date().toLocaleDateString("en-CA"),
+        tzOffsetMin: new Date().getTimezoneOffset(),
+      }),
+    }).then((r) => json<{ message: ChatMessage | null }>(r)),
   chat: (text: string) =>
     fetch("/api/chat", {
       method: "POST",

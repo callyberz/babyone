@@ -4,14 +4,23 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import {
   deleteRecord,
+  findRecords,
+  getKv,
   insertMessage,
   insertRecord,
   listMessages,
   listRecords,
+  setKv,
   updateRecord,
 } from "./db.js";
 import { seedIfEmpty } from "./seed.js";
 import { llmEnabled, llmParse } from "./llm.js";
+import {
+  aggregateBaseline,
+  aggregateDay,
+  computeBriefWindow,
+  generateBriefText,
+} from "./brief.js";
 import type { RoutineRecord } from "./types.js";
 
 seedIfEmpty();
@@ -80,6 +89,60 @@ app.post("/api/chat", async (c) => {
     updated: result.updated,
     deleted: result.deleted,
   });
+});
+
+app.post("/api/brief/today", async (c) => {
+  const { localDate, tzOffsetMin } = (await c.req.json()) as {
+    localDate: string;
+    tzOffsetMin: number;
+  };
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(localDate) ||
+    typeof tzOffsetMin !== "number"
+  ) {
+    return c.json({ error: "bad_request" }, 400);
+  }
+
+  if (getKv("brief.lastDate") === localDate) {
+    return c.json({ message: null, reason: "already_generated" });
+  }
+
+  const { yesterdayStart, yesterdayEnd, baselineStart } = computeBriefWindow(
+    localDate,
+    tzOffsetMin,
+  );
+
+  const all = findRecords({
+    since: baselineStart,
+    until: yesterdayEnd,
+    limit: 2000,
+  });
+  const yesterdayRecords = all.filter(
+    (r) => r.at >= yesterdayStart && r.at < yesterdayEnd,
+  );
+  const baselineRecords = all.filter((r) => r.at < yesterdayStart);
+
+  if (yesterdayRecords.length <= 2) {
+    setKv("brief.lastDate", localDate);
+    return c.json({ message: null, reason: "insufficient_data" });
+  }
+
+  const yest = aggregateDay(yesterdayRecords);
+  const { avg } = aggregateBaseline(
+    baselineRecords,
+    new Date(baselineStart),
+    new Date(yesterdayStart),
+  );
+  const text = await generateBriefText(yest, avg);
+
+  const msg = insertMessage({
+    from: "bot",
+    at: new Date().toISOString(),
+    text,
+    recordIds: [],
+  });
+  setKv("brief.lastDate", localDate);
+  return c.json({ message: msg });
 });
 
 const staticRoot = process.env.STATIC_ROOT ?? "../client/dist";
