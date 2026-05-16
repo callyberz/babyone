@@ -50,14 +50,13 @@ export function useDeleteRecord() {
 }
 
 export function useBrief() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: api.brief,
-    onSuccess: (res) => {
-      // The server already persisted the brief message; refetch so it lands
-      // in the cache without racing the initial messages query.
-      if (res.message) qc.invalidateQueries({ queryKey: messagesKey });
-    },
+  // Date in the key so it re-fires once the calendar day rolls over.
+  return useQuery({
+    queryKey: ["brief", new Date().toLocaleDateString("en-CA")],
+    queryFn: api.brief,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    retry: false,
   });
 }
 

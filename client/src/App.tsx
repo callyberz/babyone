@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { RoutineRecord } from "./types";
 import { CalendarScreen } from "./components/CalendarScreen";
 import { ChatScreen } from "./components/ChatScreen";
@@ -11,7 +11,6 @@ import { TrendsScreen } from "./components/TrendsScreen";
 import type { View } from "./components/views";
 import {
   useBaby,
-  useBrief,
   useDeleteRecord,
   useRecords,
   useUpdateRecord,
@@ -61,16 +60,6 @@ export function App() {
     localStorage.setItem("clement.theme", theme);
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
-
-  const brief = useBrief();
-  const briefFired = useRef(false);
-  useEffect(() => {
-    // Fire the daily brief once on app open. Ref-guarded so React's
-    // StrictMode double-mount doesn't trigger two requests.
-    if (briefFired.current) return;
-    briefFired.current = true;
-    brief.mutate();
-  }, [brief]);
 
   const updateRecord = (r: RoutineRecord) => {
     updateRecordMut.mutate(r);

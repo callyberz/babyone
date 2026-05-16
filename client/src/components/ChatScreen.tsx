@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage, RoutineRecord } from "../types";
-import { useChat, useMessages } from "../queries";
+import { useBrief, useChat, useMessages } from "../queries";
 import { fmtAgo, fmtDay, fmtTime, formatTimezone } from "../utils";
 import { Icon } from "./icons";
 import { RecordIcon } from "./RecordIcon";
@@ -16,9 +16,20 @@ const SUGGESTIONS = [
 
 export function ChatScreen({ records }: { records: RoutineRecord[] }) {
   const { data: messages = [] } = useMessages();
+  const { data: briefData } = useBrief();
   const chatMutation = useChat();
   const [extras, setExtras] = useState<ChatMessage[]>([]);
-  const chat = useMemo(() => [...messages, ...extras], [messages, extras]);
+  const briefMsg = briefData?.message ?? null;
+  const chat = useMemo(() => {
+    // The brief is also persisted server-side: same session it shows via the
+    // brief query; after a reload it arrives in `messages` and the brief query
+    // returns null — dedup by id keeps it from appearing twice.
+    const base =
+      briefMsg && !messages.some((m) => m.id === briefMsg.id)
+        ? [...messages, briefMsg]
+        : messages;
+    return [...base, ...extras];
+  }, [messages, briefMsg, extras]);
   const typing = chatMutation.isPending;
   const [draft, setDraft] = useState("");
   const [pillLabel, setPillLabel] = useState<string | null>(null);
