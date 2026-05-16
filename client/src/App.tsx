@@ -1,6 +1,5 @@
-import { useEffect, useState } from "react";
-import { api, type ChatResult } from "./api";
-import type { Baby, ChatMessage, RoutineRecord } from "./types";
+import { useEffect, useRef, useState } from "react";
+import type { RoutineRecord } from "./types";
 import { CalendarScreen } from "./components/CalendarScreen";
 import { ChatScreen } from "./components/ChatScreen";
 import { DashScreen } from "./components/DashScreen";
@@ -10,6 +9,13 @@ import { Sidebar, TabBar } from "./components/Sidebar";
 import { TodayScreen } from "./components/TodayScreen";
 import { TrendsScreen } from "./components/TrendsScreen";
 import type { View } from "./components/views";
+import {
+  useBaby,
+  useBrief,
+  useDeleteRecord,
+  useRecords,
+  useUpdateRecord,
+} from "./queries";
 
 const titles: Record<View, { t: string; s: string }> = {
   chat: {
@@ -33,17 +39,20 @@ const readView = (): View => {
 const readTheme = (): "light" | "dark" =>
   localStorage.getItem("clement.theme") === "dark" ? "dark" : "light";
 
-const sortRecords = (rs: RoutineRecord[]) =>
-  [...rs].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
-
 export function App() {
   const [view, setView] = useState<View>(readView);
   const [theme, setTheme] = useState<"light" | "dark">(readTheme);
-  const [records, setRecords] = useState<RoutineRecord[]>([]);
-  const [chat, setChat] = useState<ChatMessage[]>([]);
-  const [baby, setBaby] = useState<Baby | null>(null);
   const [editing, setEditing] = useState<RoutineRecord | null>(null);
-  const [loadErr, setLoadErr] = useState<string | null>(null);
+
+  const recordsQuery = useRecords();
+  const babyQuery = useBaby();
+  const updateRecordMut = useUpdateRecord();
+  const deleteRecordMut = useDeleteRecord();
+
+  const records = recordsQuery.data ?? [];
+  const baby = babyQuery.data ?? null;
+  const loadError = recordsQuery.error ?? babyQuery.error;
+  const loadErr = loadError instanceof Error ? loadError.message : null;
 
   useEffect(() => {
     localStorage.setItem("clement.view", view);
@@ -53,53 +62,21 @@ export function App() {
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
 
+  const brief = useBrief();
+  const briefFired = useRef(false);
   useEffect(() => {
-    let cancel = false;
-    Promise.all([api.listRecords(), api.listMessages(), api.baby()])
-      .then(([rs, ms, b]) => {
-        if (cancel) return;
-        setRecords(sortRecords(rs));
-        setChat(ms);
-        setBaby(b);
-        // Best-effort daily brief — runs after the initial chat load so it
-        // appends rather than racing the setChat(ms) above. Never blocks the app.
-        api
-          .brief()
-          .then((res) => {
-            if (!cancel && res.message) {
-              const m = res.message;
-              setChat((c) => [...c, m]);
-            }
-          })
-          .catch((err) => console.warn("[brief] failed:", err));
-      })
-      .catch((err) => !cancel && setLoadErr((err as Error).message));
-    return () => {
-      cancel = true;
-    };
-  }, []);
+    // Fire the daily brief once on app open. Ref-guarded so React's
+    // StrictMode double-mount doesn't trigger two requests.
+    if (briefFired.current) return;
+    briefFired.current = true;
+    brief.mutate();
+  }, [brief]);
 
-  const applyChatResult = ({ created, updated, deleted }: ChatResult) => {
-    if (!created.length && !updated.length && !deleted.length) return;
-    setRecords((rs) => {
-      const updatedById = new Map(updated.map((r) => [r.id, r]));
-      const deletedSet = new Set(deleted);
-      const next = rs
-        .filter((r) => !deletedSet.has(r.id))
-        .map((r) => updatedById.get(r.id) ?? r);
-      return sortRecords([...created, ...next]);
-    });
+  const updateRecord = (r: RoutineRecord) => {
+    updateRecordMut.mutate(r);
   };
-  const updateRecord = async (r: RoutineRecord) => {
-    const saved = await api.updateRecord(r);
-    setRecords((rs) =>
-      sortRecords(rs.map((x) => (x.id === saved.id ? saved : x))),
-    );
-  };
-  const deleteRecord = async (id: number) => {
-    await api.deleteRecord(id);
-    setRecords((rs) => rs.filter((r) => r.id !== id));
-    setEditing(null);
+  const deleteRecord = (id: number) => {
+    deleteRecordMut.mutate(id, { onSuccess: () => setEditing(null) });
   };
 
   return (
@@ -131,14 +108,7 @@ export function App() {
           </div>
         </header>
         <div className="screen">
-          {view === "chat" && (
-            <ChatScreen
-              records={records}
-              chat={chat}
-              setChat={setChat}
-              onChatResult={applyChatResult}
-            />
-          )}
+          {view === "chat" && <ChatScreen records={records} />}
           {view === "today" && (
             <TodayScreen records={records} openRecord={setEditing} />
           )}

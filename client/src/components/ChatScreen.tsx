@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, type ChatResult } from "../api";
 import type { ChatMessage, RoutineRecord } from "../types";
+import { useChat, useMessages } from "../queries";
 import { fmtAgo, fmtDay, fmtTime, formatTimezone } from "../utils";
 import { Icon } from "./icons";
 import { RecordIcon } from "./RecordIcon";
@@ -14,19 +14,13 @@ const SUGGESTIONS = [
   "How much sleep today?",
 ];
 
-export function ChatScreen({
-  records,
-  chat,
-  setChat,
-  onChatResult,
-}: {
-  records: RoutineRecord[];
-  chat: ChatMessage[];
-  setChat: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
-  onChatResult: (r: ChatResult) => void;
-}) {
+export function ChatScreen({ records }: { records: RoutineRecord[] }) {
+  const { data: messages = [] } = useMessages();
+  const chatMutation = useChat();
+  const [extras, setExtras] = useState<ChatMessage[]>([]);
+  const chat = useMemo(() => [...messages, ...extras], [messages, extras]);
+  const typing = chatMutation.isPending;
   const [draft, setDraft] = useState("");
-  const [typing, setTyping] = useState(false);
   const [pillLabel, setPillLabel] = useState<string | null>(null);
   const [pillVisible, setPillVisible] = useState(false);
   const streamRef = useRef<HTMLDivElement>(null);
@@ -99,11 +93,10 @@ export function ChatScreen({
     return m;
   }, [records]);
 
-  const send = async (textOverride?: string) => {
+  const send = (textOverride?: string) => {
     const text = (textOverride ?? draft).trim();
     if (!text || typing) return;
     setDraft("");
-    setTyping(true);
 
     const tempId = -Date.now();
     const tempUser: ChatMessage = {
@@ -113,34 +106,25 @@ export function ChatScreen({
       text,
       recordIds: [],
     };
-    setChat((c) => [...c, tempUser]);
+    setExtras((e) => [...e, tempUser]);
 
-    try {
-      const res = await api.chat(text);
-      onChatResult({
-        created: res.created,
-        updated: res.updated,
-        deleted: res.deleted,
-      });
-      setChat((c) => [
-        ...c.filter((m) => m.id !== tempId),
-        res.userMsg,
-        res.botMsg,
-      ]);
-    } catch (err) {
-      setChat((c) => [
-        ...c,
-        {
-          id: Date.now(),
-          from: "bot",
-          at: new Date().toISOString(),
-          text: `Couldn't reach the server — ${(err as Error).message}`,
-          recordIds: [],
-        },
-      ]);
-    } finally {
-      setTyping(false);
-    }
+    chatMutation.mutate(text, {
+      onSuccess: () => {
+        setExtras((e) => e.filter((m) => m.id !== tempId));
+      },
+      onError: (err) => {
+        setExtras((e) => [
+          ...e,
+          {
+            id: Date.now(),
+            from: "bot",
+            at: new Date().toISOString(),
+            text: `Couldn't reach the server — ${(err as Error).message}`,
+            recordIds: [],
+          },
+        ]);
+      },
+    });
   };
 
   const onKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement> = (e) => {
