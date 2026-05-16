@@ -71,7 +71,7 @@ export function App() {
               setChat((c) => [...c, m]);
             }
           })
-          .catch(() => {});
+          .catch((err) => console.warn("[brief] failed:", err));
       })
       .catch((err) => !cancel && setLoadErr((err as Error).message));
     return () => {
