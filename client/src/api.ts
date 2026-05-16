@@ -36,9 +36,3 @@ export const api = {
       }>(r),
     ),
 };
-
-export interface ChatResult {
-  created: RoutineRecord[];
-  updated: RoutineRecord[];
-  deleted: number[];
-}
