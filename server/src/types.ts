@@ -29,12 +29,15 @@ export interface RoutineRecord {
   meta: RecordMeta;
 }
 
+export type MessageKind = "chat" | "brief";
+
 export interface ChatMessage {
   id: number;
   from: "user" | "bot";
   at: string;
   text: string;
   recordIds: number[];
+  kind?: MessageKind;
 }
 
 export interface ParseResult {

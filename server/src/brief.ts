@@ -11,6 +11,7 @@ export interface BriefWindow {
   yesterdayStart: string;
   yesterdayEnd: string;
   baselineStart: string;
+  todayEnd: string;
 }
 
 // localDate is the client's *today* (YYYY-MM-DD) in its local timezone.
@@ -25,10 +26,12 @@ export function computeBriefWindow(
   const yesterdayStart = new Date(todayStartMs - DAY_MS);
   const yesterdayEnd = new Date(todayStartMs);
   const baselineStart = new Date(todayStartMs - 8 * DAY_MS);
+  const todayEnd = new Date(todayStartMs + DAY_MS);
   return {
     yesterdayStart: yesterdayStart.toISOString(),
     yesterdayEnd: yesterdayEnd.toISOString(),
     baselineStart: baselineStart.toISOString(),
+    todayEnd: todayEnd.toISOString(),
   };
 }
 

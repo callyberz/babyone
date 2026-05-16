@@ -6,6 +6,7 @@ import {
   deleteRecord,
   findRecords,
   getKv,
+  hasBriefInRange,
   insertMessage,
   insertRecord,
   listMessages,
@@ -107,10 +108,15 @@ app.post("/api/brief/today", async (c) => {
     return c.json({ message: null, reason: "already_generated" });
   }
 
-  const { yesterdayStart, yesterdayEnd, baselineStart } = computeBriefWindow(
-    localDate,
-    tzOffsetMin,
-  );
+  const { yesterdayStart, yesterdayEnd, baselineStart, todayEnd } =
+    computeBriefWindow(localDate, tzOffsetMin);
+
+  // Belt-and-suspenders: if the kv flag was lost (DB restore, manual edit),
+  // fall back to checking whether a brief message already exists for today.
+  if (hasBriefInRange(yesterdayEnd, todayEnd)) {
+    setKv("brief.lastDate", localDate);
+    return c.json({ message: null, reason: "already_generated" });
+  }
 
   const all = findRecords({
     since: baselineStart,
@@ -140,6 +146,7 @@ app.post("/api/brief/today", async (c) => {
     at: new Date().toISOString(),
     text,
     recordIds: [],
+    kind: "brief",
   });
   setKv("brief.lastDate", localDate);
   return c.json({ message: msg });
