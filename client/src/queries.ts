@@ -49,6 +49,17 @@ export function useDeleteRecord() {
   });
 }
 
+export function useBrief() {
+  // Date in the key so it re-fires once the calendar day rolls over.
+  return useQuery({
+    queryKey: ["brief", new Date().toLocaleDateString("en-CA")],
+    queryFn: api.brief,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+}
+
 export function useChat() {
   const qc = useQueryClient();
   return useMutation({

@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type {
   ChatMessage,
+  MessageKind,
   RoutineRecord,
   RecordMeta,
   RecordType,
@@ -31,7 +32,8 @@ db.exec(`
     sender      TEXT NOT NULL CHECK (sender IN ('user','bot')),
     at          TEXT NOT NULL,
     text        TEXT NOT NULL,
-    record_ids  TEXT NOT NULL DEFAULT '[]'
+    record_ids  TEXT NOT NULL DEFAULT '[]',
+    kind        TEXT NOT NULL DEFAULT 'chat'
   );
   CREATE INDEX IF NOT EXISTS idx_messages_at ON messages(at ASC);
 
@@ -40,6 +42,14 @@ db.exec(`
     v TEXT NOT NULL
   );
 `);
+
+// Migrate pre-existing databases whose `messages` table predates the `kind` column.
+const messageColumns = db.prepare("PRAGMA table_info(messages)").all() as {
+  name: string;
+}[];
+if (!messageColumns.some((col) => col.name === "kind")) {
+  db.exec("ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'");
+}
 
 interface RecordRow {
   id: number;
@@ -56,6 +66,7 @@ interface MessageRow {
   at: string;
   text: string;
   record_ids: string;
+  kind: MessageKind;
 }
 
 const rowToRecord = (r: RecordRow): RoutineRecord => ({
@@ -73,6 +84,7 @@ const rowToMessage = (r: MessageRow): ChatMessage => ({
   at: r.at,
   text: r.text,
   recordIds: JSON.parse(r.record_ids) as number[],
+  kind: r.kind,
 });
 
 export const listRecords = (): RoutineRecord[] =>
@@ -148,12 +160,34 @@ export const listMessages = (): ChatMessage[] =>
   ).map(rowToMessage);
 
 export const insertMessage = (m: Omit<ChatMessage, "id">): ChatMessage => {
+  const kind: MessageKind = m.kind ?? "chat";
   const info = db
     .prepare(
-      "INSERT INTO messages (sender, at, text, record_ids) VALUES (?, ?, ?, ?)",
+      "INSERT INTO messages (sender, at, text, record_ids, kind) VALUES (?, ?, ?, ?, ?)",
     )
-    .run(m.from, m.at, m.text, JSON.stringify(m.recordIds ?? []));
-  return { ...m, id: Number(info.lastInsertRowid) };
+    .run(m.from, m.at, m.text, JSON.stringify(m.recordIds ?? []), kind);
+  return { ...m, kind, id: Number(info.lastInsertRowid) };
+};
+
+// True if a brief message already exists with `at` in [startIso, endIso).
+export const hasBriefInRange = (startIso: string, endIso: string): boolean => {
+  const row = db
+    .prepare(
+      "SELECT 1 FROM messages WHERE kind = 'brief' AND at >= ? AND at < ? LIMIT 1",
+    )
+    .get(startIso, endIso);
+  return row !== undefined;
+};
+
+export const getKv = (k: string): string | null => {
+  const row = db.prepare("SELECT v FROM kv WHERE k=?").get(k) as
+    | { v: string }
+    | undefined;
+  return row?.v ?? null;
+};
+
+export const setKv = (k: string, v: string): void => {
+  db.prepare("INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)").run(k, v);
 };
 
 export const isSeeded = (): boolean => {
