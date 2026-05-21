@@ -76,11 +76,7 @@ app.get("/api/records", (c) => c.json(listRecords()));
 app.post("/api/records", async (c) => {
   const body = (await c.req.json()) as Omit<RoutineRecord, "id" | "user">;
   const user = c.get("user");
-  const record = insertRecord({ ...body, userId: user.id });
-  return c.json({
-    ...record,
-    user: { id: user.id, displayName: user.displayName },
-  });
+  return c.json(insertRecord({ ...body, userId: user.id }));
 });
 
 app.put("/api/records/:id", async (c) => {

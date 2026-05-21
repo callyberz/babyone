@@ -194,7 +194,9 @@ export const insertRecord = (
       JSON.stringify(r.meta ?? {}),
       r.userId ?? null,
     );
-  return { ...r, id: Number(info.lastInsertRowid) };
+  // Re-read through the JOIN so the return value has `user` populated and no
+  // stray DB-layer `userId` leaked from the input spread.
+  return getRecord(Number(info.lastInsertRowid))!;
 };
 
 export const updateRecord = (r: RoutineRecord): RoutineRecord => {
