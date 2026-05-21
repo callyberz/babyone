@@ -100,6 +100,8 @@ interface RecordRow {
   title: string;
   detail: string;
   meta: string;
+  user_id: number | null;
+  user_display_name: string | null;
 }
 
 interface MessageRow {
@@ -118,7 +120,15 @@ const rowToRecord = (r: RecordRow): RoutineRecord => ({
   title: r.title,
   detail: r.detail,
   meta: JSON.parse(r.meta) as RecordMeta,
+  user:
+    r.user_id !== null && r.user_display_name !== null
+      ? { id: r.user_id, displayName: r.user_display_name }
+      : null,
 });
+
+const BASE_SELECT =
+  "SELECT r.*, u.display_name AS user_display_name FROM records r " +
+  "LEFT JOIN users u ON u.id = r.user_id";
 
 const rowToMessage = (r: MessageRow): ChatMessage => ({
   id: r.id,
@@ -130,9 +140,9 @@ const rowToMessage = (r: MessageRow): ChatMessage => ({
 });
 
 export const listRecords = (): RoutineRecord[] =>
-  (
-    db.prepare("SELECT * FROM records ORDER BY at DESC").all() as RecordRow[]
-  ).map(rowToRecord);
+  (db.prepare(`${BASE_SELECT} ORDER BY r.at DESC`).all() as RecordRow[]).map(
+    rowToRecord,
+  );
 
 export const findRecords = (opts: {
   since?: string;
@@ -143,38 +153,47 @@ export const findRecords = (opts: {
   const where: string[] = [];
   const params: (string | number)[] = [];
   if (opts.since) {
-    where.push("at >= ?");
+    where.push("r.at >= ?");
     params.push(opts.since);
   }
   if (opts.until) {
-    where.push("at <= ?");
+    where.push("r.at <= ?");
     params.push(opts.until);
   }
   if (opts.type) {
-    where.push("type = ?");
+    where.push("r.type = ?");
     params.push(opts.type);
   }
   const sql =
-    "SELECT * FROM records" +
+    `${BASE_SELECT}` +
     (where.length ? " WHERE " + where.join(" AND ") : "") +
-    " ORDER BY at DESC LIMIT ?";
+    " ORDER BY r.at DESC LIMIT ?";
   params.push(opts.limit ?? 20);
   return (db.prepare(sql).all(...params) as RecordRow[]).map(rowToRecord);
 };
 
 export const getRecord = (id: number): RoutineRecord | null => {
-  const row = db.prepare("SELECT * FROM records WHERE id = ?").get(id) as
+  const row = db.prepare(`${BASE_SELECT} WHERE r.id = ?`).get(id) as
     | RecordRow
     | undefined;
   return row ? rowToRecord(row) : null;
 };
 
-export const insertRecord = (r: Omit<RoutineRecord, "id">): RoutineRecord => {
+export const insertRecord = (
+  r: Omit<RoutineRecord, "id"> & { userId?: number | null },
+): RoutineRecord => {
   const info = db
     .prepare(
-      "INSERT INTO records (type, at, title, detail, meta) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO records (type, at, title, detail, meta, user_id) VALUES (?, ?, ?, ?, ?, ?)",
     )
-    .run(r.type, r.at, r.title, r.detail ?? "", JSON.stringify(r.meta ?? {}));
+    .run(
+      r.type,
+      r.at,
+      r.title,
+      r.detail ?? "",
+      JSON.stringify(r.meta ?? {}),
+      r.userId ?? null,
+    );
   return { ...r, id: Number(info.lastInsertRowid) };
 };
 
@@ -245,3 +264,12 @@ export const markSeeded = (): void => {
     "1",
   );
 };
+
+export interface UserRow {
+  id: number;
+  email: string;
+  display_name: string;
+}
+
+export const countUsers = (): number =>
+  (db.prepare("SELECT COUNT(*) AS c FROM users").get() as { c: number }).c;

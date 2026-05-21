@@ -27,6 +27,7 @@ export interface RoutineRecord {
   title: string;
   detail: string;
   meta: RecordMeta;
+  user?: { id: number; displayName: string } | null;
 }
 
 export type MessageKind = "chat" | "brief";

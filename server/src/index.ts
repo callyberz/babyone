@@ -3,6 +3,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import {
+  db,
   deleteRecord,
   findRecords,
   getKv,
@@ -23,13 +24,44 @@ import {
   generateBriefText,
 } from "./brief.js";
 import type { RoutineRecord } from "./types.js";
+import {
+  originGuard,
+  makeRequireAuth,
+  type AuthEnv,
+} from "./auth/middleware.js";
+import { mountAuthRoutes, mountInviteRoutes } from "./auth/routes.js";
+import { cleanupExpiredSessions } from "./auth/sessions.js";
+import { cleanupExpiredInvites } from "./auth/invites.js";
 
 seedIfEmpty();
+cleanupExpiredSessions(db);
+cleanupExpiredInvites(db);
 
-const app = new Hono();
-app.use("/api/*", cors());
+const app = new Hono<AuthEnv>();
 
+const origin = process.env.BABYONE_ORIGIN ?? "http://localhost:5173";
+app.use(
+  "/api/*",
+  cors({
+    origin,
+    credentials: true,
+    allowMethods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
+    allowHeaders: ["Content-Type"],
+  }),
+);
+
+app.use("/api/*", originGuard);
+
+// Open routes (mounted BEFORE requireAuth so they pass through).
 app.get("/api/health", (c) => c.json({ ok: true, llm: llmEnabled }));
+mountAuthRoutes(app, db);
+
+// Everything else under /api/* requires a valid session.
+const requireAuth = makeRequireAuth(db);
+app.use("/api/*", requireAuth);
+
+// Gated auth-adjacent routes (must come AFTER requireAuth).
+mountInviteRoutes(app, db);
 
 app.get("/api/baby", (c) =>
   c.json({
@@ -42,8 +74,9 @@ app.get("/api/baby", (c) =>
 app.get("/api/records", (c) => c.json(listRecords()));
 
 app.post("/api/records", async (c) => {
-  const body = (await c.req.json()) as Omit<RoutineRecord, "id">;
-  return c.json(insertRecord(body));
+  const body = (await c.req.json()) as Omit<RoutineRecord, "id" | "user">;
+  const user = c.get("user");
+  return c.json(insertRecord({ ...body, userId: user.id }));
 });
 
 app.put("/api/records/:id", async (c) => {
