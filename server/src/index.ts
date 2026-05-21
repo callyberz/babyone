@@ -15,7 +15,7 @@ import {
   setKv,
   updateRecord,
 } from "./db.js";
-import { seedIfEmpty } from "./seed.js";
+import { seedIfEmpty, bootstrapAuth } from "./seed.js";
 import { llmEnabled, llmParse } from "./llm.js";
 import {
   aggregateBaseline,
@@ -33,6 +33,7 @@ import { mountAuthRoutes, mountInviteRoutes } from "./auth/routes.js";
 import { cleanupExpiredSessions } from "./auth/sessions.js";
 import { cleanupExpiredInvites } from "./auth/invites.js";
 
+await bootstrapAuth();
 seedIfEmpty();
 cleanupExpiredSessions(db);
 cleanupExpiredInvites(db);

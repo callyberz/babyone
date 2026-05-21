@@ -1,5 +1,81 @@
-import { insertMessage, insertRecord, isSeeded, markSeeded } from "./db.js";
+import {
+  insertMessage,
+  insertRecord,
+  isSeeded,
+  markSeeded,
+  db as defaultDb,
+} from "./db.js";
 import type { RoutineRecord } from "./types.js";
+import type DatabaseT from "better-sqlite3";
+import { hashPassword } from "./auth/passwords.js";
+
+export interface AdminCreds {
+  email: string;
+  password: string;
+  displayName: string;
+}
+
+export function readAdminCredsFromEnv(): AdminCreds | null {
+  const email = process.env.BABYONE_ADMIN_EMAIL;
+  const password = process.env.BABYONE_ADMIN_PASSWORD;
+  const displayName = process.env.BABYONE_ADMIN_NAME;
+  if (!email || !password || !displayName) return null;
+  return { email: email.toLowerCase(), password, displayName };
+}
+
+export async function bootstrapAdmin(
+  db: DatabaseT.Database,
+  creds: AdminCreds | null,
+): Promise<number | null> {
+  const existing = (
+    db.prepare("SELECT COUNT(*) AS c FROM users").get() as { c: number }
+  ).c;
+  if (existing > 0) return null;
+
+  if (!creds) {
+    console.error(
+      "[babyone] No users in DB and BABYONE_ADMIN_* env vars not set. " +
+        "Set BABYONE_ADMIN_EMAIL, BABYONE_ADMIN_PASSWORD, and BABYONE_ADMIN_NAME, then restart.",
+    );
+    process.exit(1);
+    return null;
+  }
+
+  const hash = await hashPassword(creds.password);
+  const info = db
+    .prepare(
+      "INSERT INTO users (email, password_hash, display_name, created_at) VALUES (?, ?, ?, ?)",
+    )
+    .run(creds.email, hash, creds.displayName, new Date().toISOString());
+  const id = Number(info.lastInsertRowid);
+  console.log(
+    `[babyone] Created admin user ${creds.email}. ` +
+      "You can unset BABYONE_ADMIN_* env vars now.",
+  );
+  return id;
+}
+
+export function backfillRecordsUser(
+  db: DatabaseT.Database,
+  adminId: number,
+): void {
+  db.prepare("UPDATE records SET user_id = ? WHERE user_id IS NULL").run(
+    adminId,
+  );
+}
+
+export async function bootstrapAuth(): Promise<void> {
+  const creds = readAdminCredsFromEnv();
+  const id = await bootstrapAdmin(defaultDb, creds);
+  if (id !== null) backfillRecordsUser(defaultDb, id);
+  else {
+    // Ensure no orphan records (no-op after first run).
+    const first = defaultDb
+      .prepare("SELECT id FROM users ORDER BY id LIMIT 1")
+      .get() as { id: number } | undefined;
+    if (first) backfillRecordsUser(defaultDb, first.id);
+  }
+}
 
 const now = () => new Date();
 const hoursAgo = (h: number, m = 0) => {
