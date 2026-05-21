@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import type DatabaseT from "better-sqlite3";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type {
@@ -8,6 +9,45 @@ import type {
   RecordMeta,
   RecordType,
 } from "./types.js";
+
+export function applyAuthSchema(d: DatabaseT.Database): void {
+  d.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      email         TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      password_hash TEXT NOT NULL,
+      display_name  TEXT NOT NULL,
+      created_at    TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS sessions (
+      id         TEXT PRIMARY KEY,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      user_agent TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+
+    CREATE TABLE IF NOT EXISTS invites (
+      code        TEXT PRIMARY KEY,
+      created_by  INTEGER NOT NULL REFERENCES users(id),
+      created_at  TEXT NOT NULL,
+      expires_at  TEXT NOT NULL,
+      consumed_by INTEGER REFERENCES users(id),
+      consumed_at TEXT
+    );
+  `);
+
+  const cols = d.prepare("PRAGMA table_info(records)").all() as {
+    name: string;
+  }[];
+  if (!cols.some((c) => c.name === "user_id")) {
+    d.exec(
+      "ALTER TABLE records ADD COLUMN user_id INTEGER REFERENCES users(id)",
+    );
+  }
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dbPath = process.env.BABYONE_DB ?? path.resolve(__dirname, "../data.db");
@@ -42,6 +82,8 @@ db.exec(`
     v TEXT NOT NULL
   );
 `);
+
+applyAuthSchema(db);
 
 // Migrate pre-existing databases whose `messages` table predates the `kind` column.
 const messageColumns = db.prepare("PRAGMA table_info(messages)").all() as {
