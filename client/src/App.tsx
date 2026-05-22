@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { RoutineRecord } from "./types";
+import type { RoutineRecord, User } from "./types";
 import { CalendarScreen } from "./components/CalendarScreen";
 import { ChatScreen } from "./components/ChatScreen";
 import { DashScreen } from "./components/DashScreen";
@@ -15,6 +15,10 @@ import {
   useRecords,
   useUpdateRecord,
 } from "./queries";
+import { useMe } from "./auth/useAuth";
+import { LoginPage } from "./auth/LoginPage";
+import { SignupPage } from "./auth/SignupPage";
+import { Splash } from "./auth/Splash";
 
 const titles: Record<View, { t: string; s: string }> = {
   chat: {
@@ -39,6 +43,16 @@ const readTheme = (): "light" | "dark" =>
   localStorage.getItem("clement.theme") === "dark" ? "dark" : "light";
 
 export function App() {
+  const me = useMe();
+  if (me.isLoading) return <Splash />;
+  if (!me.data) {
+    if (window.location.pathname === "/signup") return <SignupPage />;
+    return <LoginPage />;
+  }
+  return <AuthenticatedApp user={me.data} />;
+}
+
+function AuthenticatedApp({ user }: { user: User }) {
   const [view, setView] = useState<View>(readView);
   const [theme, setTheme] = useState<"light" | "dark">(readTheme);
   const [editing, setEditing] = useState<RoutineRecord | null>(null);
@@ -61,12 +75,9 @@ export function App() {
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
 
-  const updateRecord = (r: RoutineRecord) => {
-    updateRecordMut.mutate(r);
-  };
-  const deleteRecord = (id: number) => {
+  const updateRecord = (r: RoutineRecord) => updateRecordMut.mutate(r);
+  const deleteRecord = (id: number) =>
     deleteRecordMut.mutate(id, { onSuccess: () => setEditing(null) });
-  };
 
   return (
     <div className="app">
@@ -76,6 +87,7 @@ export function App() {
         theme={theme}
         setTheme={setTheme}
         baby={baby}
+        user={user}
       />
       <main className="main">
         <header className="topbar">
