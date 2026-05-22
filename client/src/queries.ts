@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
 import type { ChatMessage, RoutineRecord } from "./types";
+import { useMe } from "./auth/useAuth";
 
 export const recordsKey = ["records"] as const;
 export const messagesKey = ["messages"] as const;
@@ -10,19 +11,27 @@ const sortRecords = (rs: RoutineRecord[]) =>
   [...rs].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
 
 export function useRecords() {
+  const me = useMe();
   return useQuery({
     queryKey: recordsKey,
     queryFn: api.listRecords,
     select: sortRecords,
+    enabled: !!me.data,
   });
 }
 
 export function useMessages() {
-  return useQuery({ queryKey: messagesKey, queryFn: api.listMessages });
+  const me = useMe();
+  return useQuery({
+    queryKey: messagesKey,
+    queryFn: api.listMessages,
+    enabled: !!me.data,
+  });
 }
 
 export function useBaby() {
-  return useQuery({ queryKey: babyKey, queryFn: api.baby });
+  const me = useMe();
+  return useQuery({ queryKey: babyKey, queryFn: api.baby, enabled: !!me.data });
 }
 
 export function useUpdateRecord() {
@@ -50,6 +59,7 @@ export function useDeleteRecord() {
 }
 
 export function useBrief() {
+  const me = useMe();
   // Date in the key so it re-fires once the calendar day rolls over.
   return useQuery({
     queryKey: ["brief", new Date().toLocaleDateString("en-CA")],
@@ -57,6 +67,7 @@ export function useBrief() {
     staleTime: Infinity,
     refetchOnWindowFocus: false,
     retry: false,
+    enabled: !!me.data,
   });
 }
 
