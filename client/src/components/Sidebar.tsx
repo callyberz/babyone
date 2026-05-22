@@ -1,6 +1,8 @@
-import type { Baby } from "../types";
+import type { Baby, User } from "../types";
 import { Icon } from "./icons";
 import type { View } from "./views";
+import { InvitePanel } from "../auth/InvitePanel";
+import { useLogout } from "../auth/useAuth";
 
 const navItems: {
   id: View;
@@ -20,13 +22,16 @@ export function Sidebar({
   theme,
   setTheme,
   baby,
+  user,
 }: {
   view: View;
   setView: (v: View) => void;
   theme: "light" | "dark";
   setTheme: (t: "light" | "dark") => void;
   baby: Baby | null;
+  user: User;
 }) {
+  const logout = useLogout();
   return (
     <aside className="sidebar">
       <div className="logo">
@@ -64,12 +69,23 @@ export function Sidebar({
       </nav>
 
       <div className="sidebar-footer">
+        <div className="me-card">
+          Signed in as <strong>{user.displayName}</strong>
+        </div>
+        <InvitePanel />
         <button
           className="theme-toggle"
           onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
         >
           <span>{theme === "dark" ? "Dark mode" : "Light mode"}</span>
           <div className={`toggle-switch ${theme === "dark" ? "on" : ""}`} />
+        </button>
+        <button
+          className="btn btn-small"
+          onClick={() => logout.mutate()}
+          disabled={logout.isPending}
+        >
+          Sign out
         </button>
       </div>
     </aside>
