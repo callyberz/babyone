@@ -33,8 +33,10 @@ import { mountAuthRoutes, mountInviteRoutes } from "./auth/routes.js";
 import { cleanupExpiredSessions } from "./auth/sessions.js";
 import { cleanupExpiredInvites } from "./auth/invites.js";
 
-await bootstrapAuth();
+// Seed demo data first so the admin backfill in bootstrapAuth() attributes
+// freshly-seeded records to the admin on a brand-new database.
 seedIfEmpty();
+await bootstrapAuth();
 cleanupExpiredSessions(db);
 cleanupExpiredInvites(db);
 
