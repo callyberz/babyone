@@ -32,6 +32,30 @@ npm run start
 
 The server serves the built client from its static root in production.
 
+## Authentication
+
+babyone is single-household but multi-caregiver. The first time the server boots
+against an empty database it provisions an admin user from environment variables:
+
+```
+BABYONE_ADMIN_EMAIL=you@example.com
+BABYONE_ADMIN_PASSWORD=<long random string>
+BABYONE_ADMIN_NAME=Calvin
+BABYONE_ORIGIN=https://babyone.fly.dev
+```
+
+(In dev, use `BABYONE_ORIGIN=http://localhost:5173`.)
+
+After the first successful boot you can unset the `BABYONE_ADMIN_*` vars.
+
+Additional caregivers join via one-time invite links generated in the sidebar
+("Invite caregiver"). Invites expire after 24h.
+
+**Password recovery:** there is no self-service reset. To recover a forgotten
+password, an existing caregiver: (1) deletes the row from the `users` table
+(`DELETE FROM users WHERE email = ?`) — sessions cascade-delete — (2) generates
+a fresh invite for that caregiver to sign up again with the same email.
+
 ## Deployment
 
 Containerized via `Dockerfile` and deployed to Fly.io (`fly.toml`). See [`DEPLOY.md`](./DEPLOY.md) for details.
@@ -40,7 +64,8 @@ Containerized via `Dockerfile` and deployed to Fly.io (`fly.toml`). See [`DEPLOY
 
 ```
 server/                  Hono + SQLite + LLM proxy
-  src/index.ts           Routes (health, baby, records, messages, chat)
+  src/index.ts           Routes (health, auth, baby, records, messages, chat)
+  src/auth/              Passwords, sessions, invites, middleware, auth routes
   src/db.ts              SQLite schema + kv helpers
   src/seed.ts            Default baby seed
   src/llm.ts             Claude-backed parser (rule-based fallback)
