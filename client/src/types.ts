@@ -29,6 +29,7 @@ export interface RoutineRecord {
   title: string;
   detail: string;
   meta: RecordMeta;
+  user?: { id: number; displayName: string } | null;
 }
 
 export interface ChatMessage {
@@ -43,6 +44,12 @@ export interface Baby {
   name: string;
   age: string;
   weight: string;
+}
+
+export interface User {
+  id: number;
+  email: string;
+  displayName: string;
 }
 
 export interface Category {

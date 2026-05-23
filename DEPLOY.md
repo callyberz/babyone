@@ -31,6 +31,11 @@
 ## Secrets
 
 - `ANTHROPIC_API_KEY` set via `fly secrets set ANTHROPIC_API_KEY=...`.
+- `BABYONE_ORIGIN` set via `fly secrets set BABYONE_ORIGIN=https://babyone.fly.dev`.
+- For the *first* deploy against an empty DB, also set
+  `BABYONE_ADMIN_EMAIL`, `BABYONE_ADMIN_PASSWORD`, `BABYONE_ADMIN_NAME`.
+  After the machine boots once and logs "Created admin user …", run
+  `fly secrets unset BABYONE_ADMIN_EMAIL BABYONE_ADMIN_PASSWORD BABYONE_ADMIN_NAME`.
 
 ## Build prerequisite
 
@@ -77,4 +82,3 @@ fly deploy
 ## Known issues
 
 - **LLM endpoint silently falls back to rule-based parser.** `/api/health` returns `{ok:true, llm:true}` (Anthropic client constructed), but `/api/chat` round-trips in ~170 ms and returns the canned wording from `server/src/parser.ts:182`. The Claude tool-use call is throwing and `llmParse`'s `catch` block routes through `fallbackPath` without surfacing the error to the response. To debug: pull `fly logs -a babyone` and look for `[llm] tool-use loop failed`.
-- **No auth.** Anyone with the URL can write records and burn API credits. Options: app-level IP allowlist via `Fly-Client-IP` header, shared-secret cookie, or release public IPs and reach the app over `fly proxy` / WireGuard.

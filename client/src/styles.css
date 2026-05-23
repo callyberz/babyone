@@ -1129,3 +1129,76 @@ button:focus-visible {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+.auth-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: var(--bg, #f6f7f9);
+}
+.auth-card {
+  width: min(360px, 92vw);
+  padding: 32px;
+  background: var(--card, white);
+  border-radius: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+.auth-card h1 {
+  margin: 0 0 16px;
+  font-size: 20px;
+}
+.auth-card form {
+  display: grid;
+  gap: 12px;
+}
+.auth-card label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: #64748b;
+}
+.auth-card input {
+  padding: 8px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font: inherit;
+}
+.auth-error {
+  color: #b91c1c;
+  font-size: 13px;
+}
+.invite-panel {
+  display: grid;
+  gap: 8px;
+  padding: 8px 0;
+}
+.invite-result {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+}
+.invite-result code {
+  word-break: break-all;
+}
+.invite-hint {
+  color: #94a3b8;
+}
+.me-card {
+  font-size: 12px;
+  color: #64748b;
+  padding: 4px 0;
+}
+.btn-small {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.splash {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+}
+.logged-by {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-top: 4px;
+}

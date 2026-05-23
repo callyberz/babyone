@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import type DatabaseT from "better-sqlite3";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type {
@@ -8,6 +9,45 @@ import type {
   RecordMeta,
   RecordType,
 } from "./types.js";
+
+export function applyAuthSchema(d: DatabaseT.Database): void {
+  d.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      email         TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      password_hash TEXT NOT NULL,
+      display_name  TEXT NOT NULL,
+      created_at    TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS sessions (
+      id         TEXT PRIMARY KEY,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      user_agent TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+
+    CREATE TABLE IF NOT EXISTS invites (
+      code        TEXT PRIMARY KEY,
+      created_by  INTEGER NOT NULL REFERENCES users(id),
+      created_at  TEXT NOT NULL,
+      expires_at  TEXT NOT NULL,
+      consumed_by INTEGER REFERENCES users(id),
+      consumed_at TEXT
+    );
+  `);
+
+  const cols = d.prepare("PRAGMA table_info(records)").all() as {
+    name: string;
+  }[];
+  if (!cols.some((c) => c.name === "user_id")) {
+    d.exec(
+      "ALTER TABLE records ADD COLUMN user_id INTEGER REFERENCES users(id)",
+    );
+  }
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dbPath = process.env.BABYONE_DB ?? path.resolve(__dirname, "../data.db");
@@ -43,6 +83,8 @@ db.exec(`
   );
 `);
 
+applyAuthSchema(db);
+
 // Migrate pre-existing databases whose `messages` table predates the `kind` column.
 const messageColumns = db.prepare("PRAGMA table_info(messages)").all() as {
   name: string;
@@ -58,6 +100,8 @@ interface RecordRow {
   title: string;
   detail: string;
   meta: string;
+  user_id: number | null;
+  user_display_name: string | null;
 }
 
 interface MessageRow {
@@ -76,7 +120,15 @@ const rowToRecord = (r: RecordRow): RoutineRecord => ({
   title: r.title,
   detail: r.detail,
   meta: JSON.parse(r.meta) as RecordMeta,
+  user:
+    r.user_id !== null && r.user_display_name !== null
+      ? { id: r.user_id, displayName: r.user_display_name }
+      : null,
 });
+
+const BASE_SELECT =
+  "SELECT r.*, u.display_name AS user_display_name FROM records r " +
+  "LEFT JOIN users u ON u.id = r.user_id";
 
 const rowToMessage = (r: MessageRow): ChatMessage => ({
   id: r.id,
@@ -88,9 +140,9 @@ const rowToMessage = (r: MessageRow): ChatMessage => ({
 });
 
 export const listRecords = (): RoutineRecord[] =>
-  (
-    db.prepare("SELECT * FROM records ORDER BY at DESC").all() as RecordRow[]
-  ).map(rowToRecord);
+  (db.prepare(`${BASE_SELECT} ORDER BY r.at DESC`).all() as RecordRow[]).map(
+    rowToRecord,
+  );
 
 export const findRecords = (opts: {
   since?: string;
@@ -101,39 +153,50 @@ export const findRecords = (opts: {
   const where: string[] = [];
   const params: (string | number)[] = [];
   if (opts.since) {
-    where.push("at >= ?");
+    where.push("r.at >= ?");
     params.push(opts.since);
   }
   if (opts.until) {
-    where.push("at <= ?");
+    where.push("r.at <= ?");
     params.push(opts.until);
   }
   if (opts.type) {
-    where.push("type = ?");
+    where.push("r.type = ?");
     params.push(opts.type);
   }
   const sql =
-    "SELECT * FROM records" +
+    `${BASE_SELECT}` +
     (where.length ? " WHERE " + where.join(" AND ") : "") +
-    " ORDER BY at DESC LIMIT ?";
+    " ORDER BY r.at DESC LIMIT ?";
   params.push(opts.limit ?? 20);
   return (db.prepare(sql).all(...params) as RecordRow[]).map(rowToRecord);
 };
 
 export const getRecord = (id: number): RoutineRecord | null => {
-  const row = db.prepare("SELECT * FROM records WHERE id = ?").get(id) as
+  const row = db.prepare(`${BASE_SELECT} WHERE r.id = ?`).get(id) as
     | RecordRow
     | undefined;
   return row ? rowToRecord(row) : null;
 };
 
-export const insertRecord = (r: Omit<RoutineRecord, "id">): RoutineRecord => {
+export const insertRecord = (
+  r: Omit<RoutineRecord, "id"> & { userId?: number | null },
+): RoutineRecord => {
   const info = db
     .prepare(
-      "INSERT INTO records (type, at, title, detail, meta) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO records (type, at, title, detail, meta, user_id) VALUES (?, ?, ?, ?, ?, ?)",
     )
-    .run(r.type, r.at, r.title, r.detail ?? "", JSON.stringify(r.meta ?? {}));
-  return { ...r, id: Number(info.lastInsertRowid) };
+    .run(
+      r.type,
+      r.at,
+      r.title,
+      r.detail ?? "",
+      JSON.stringify(r.meta ?? {}),
+      r.userId ?? null,
+    );
+  // Re-read through the JOIN so the return value has `user` populated and no
+  // stray DB-layer `userId` leaked from the input spread.
+  return getRecord(Number(info.lastInsertRowid))!;
 };
 
 export const updateRecord = (r: RoutineRecord): RoutineRecord => {
@@ -203,3 +266,12 @@ export const markSeeded = (): void => {
     "1",
   );
 };
+
+export interface UserRow {
+  id: number;
+  email: string;
+  display_name: string;
+}
+
+export const countUsers = (): number =>
+  (db.prepare("SELECT COUNT(*) AS c FROM users").get() as { c: number }).c;

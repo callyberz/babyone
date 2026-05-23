@@ -63,11 +63,15 @@ function summariseTodaysRecords(now: Date): string {
   return ["today's logs (ids you can update/delete):", ...lines].join("\n");
 }
 
-async function fallbackPath(text: string, now: Date): Promise<ParseResult> {
+async function fallbackPath(
+  text: string,
+  now: Date,
+  loggerId: number | null,
+): Promise<ParseResult> {
   const out = ruleBasedParse(text, now);
   if (!out.draft)
     return { replyText: out.replyText, created: [], updated: [], deleted: [] };
-  const rec = insertRecord(out.draft);
+  const rec = insertRecord({ ...out.draft, userId: loggerId });
   return {
     replyText: out.replyText,
     created: [rec],
@@ -114,8 +118,9 @@ function trackToolEffect(
 export async function llmParse(
   text: string,
   now = new Date(),
+  loggerId: number | null = null,
 ): Promise<ParseResult> {
-  if (!client) return fallbackPath(text, now);
+  if (!client) return fallbackPath(text, now, loggerId);
 
   const ctx: ToolRunContext = { now, created: [], updated: [], deleted: [] };
 
@@ -132,7 +137,7 @@ export async function llmParse(
       "[llm] could not load MCP tool schemas, falling back to rule-based:",
       (err as Error).message,
     );
-    return fallbackPath(text, now);
+    return fallbackPath(text, now, loggerId);
   }
 
   const firstUserContent = `now: ${now.toISOString()}\n${summariseTodaysRecords(now)}\nparent said: ${text}`;
@@ -184,6 +189,12 @@ export async function llmParse(
       const results: Anthropic.Messages.ToolResultBlockParam[] = [];
       for (const tu of toolUses) {
         const args = (tu.input ?? {}) as Record<string, unknown>;
+        // Injected server-side, not part of the schema Claude sees, so the
+        // model can't spoof attribution. The MCP server reads this field to
+        // stamp records.user_id.
+        if (tu.name === "log_record" && loggerId != null) {
+          args._loggerId = loggerId;
+        }
         console.log("[llm] tool_use:", tu.name, JSON.stringify(args));
         try {
           const outcome = await callMcpTool(tu.name, args);
@@ -227,7 +238,7 @@ export async function llmParse(
       "[llm] tool-use loop failed, falling back to rule-based:",
       (err as Error).message,
     );
-    return fallbackPath(text, now);
+    return fallbackPath(text, now, loggerId);
   }
 }
 

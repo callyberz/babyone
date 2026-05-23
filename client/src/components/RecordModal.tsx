@@ -72,6 +72,9 @@ export function RecordModal({
             onChange={(e) => onTimeChange(e.target.value)}
           />
         </div>
+        {record.user?.displayName && (
+          <div className="logged-by">Logged by {record.user.displayName}</div>
+        )}
 
         {draft.type === "feed" && (
           <>
