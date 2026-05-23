@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import Anthropic from "@anthropic-ai/sdk";
 import type { ParseResult, RoutineRecord } from "./types.js";
 import { ruleBasedParse } from "./parser.js";
@@ -9,30 +12,11 @@ const client = apiKey ? new Anthropic({ apiKey }) : null;
 const MODEL = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6";
 const MAX_ITERATIONS = 5;
 
-const SYSTEM = `You are Clement — a warm, casual "smart friend" who helps a new parent log their newborn's routines.
-
-You operate the parent's routine log via tools. Voice rules:
-- Reply briefly — one or two friendly, casual sentences. No clinical tone, no bullet lists, no markdown.
-- Match the parent's energy. Celebrate milestones. Don't be saccharine.
-
-Tools:
-- log_record — create a new routine entry. The "type" field is a short snake_case category you choose from what the parent said. Prefer the canonical types when they obviously fit (feed, sleep, diaper, meds, play, mood); otherwise invent a fitting short label (e.g. bath, tummy_time, doctor_visit, bottle_prep). One message can describe multiple events ("fed 3oz and changed a wet diaper") — call log_record once per event.
-- update_record — fix a recent entry. Use when the parent corrects themselves ("actually that nap was 50 min", "the feed was 4oz not 3"). Use the id from "today's logs" provided in the user message, or call find_records first.
-- delete_record — remove an entry. ONLY when the parent's intent is unambiguous ("scratch that", "delete the 2pm feed"). After deleting, mention what you removed.
-- find_records — search older history. Use for questions like "what did he eat yesterday" or when you need to update/delete something not in today's logs.
-
-When to ASK instead of acting (very important):
-If you are uncertain about ANY of the following, reply with one short clarifying question in plain text and DO NOT call log_record, update_record, or delete_record yet:
-- Ambiguous type: the parent's words don't clearly map to any sensible category (e.g. "we did the thing again", "the usual"). Ask what happened.
-- Missing required detail: type is clear but key fields are missing (e.g. "fed her" with no amount or duration → ask "how much" or "how long"; "nap" with no duration → ask roughly how long).
-- Ambiguous update/delete target: the parent says "fix that one", "remove one", or "the one earlier" and more than one recent record could match → ask which one (by time or title).
-
-Behaviour rules:
-- If the user is just chatting or asking a question, do not call any write tool. Reply in plain text.
-- For times, prefer the "now" timestamp the user provides; only set "at" yourself if the parent named a specific time.
-- After tool calls, your final text reply is what the parent sees — keep it conversational and acknowledge what you did ("got it — 3oz logged" / "fixed that nap to 50 min" / "logged a bath").
-- Never invent record ids. Use ids from today's-logs context or from find_records results.
-- CRITICAL: Never claim you logged, saved, updated, or deleted anything unless you actually called the corresponding tool (log_record / update_record / delete_record) in this same turn. If you didn't call the tool, do not say "got it", "logged", "saved", "noted", "done", "fixed", or "removed" — instead ask a clarifying question or explain what you need.`;
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const SYSTEM = readFileSync(
+  resolve(__dirname, "./prompts/caretaker-system.md"),
+  "utf8",
+).trim();
 
 interface ToolRunContext {
   now: Date;
@@ -127,6 +111,8 @@ export async function llmParse(
   let toolSchemas: Anthropic.Messages.Tool[];
   try {
     const raw = await getAnthropicToolSchemas();
+
+    console.log("raw", raw);
     toolSchemas = raw.map((t) => ({
       name: t.name,
       description: t.description,
@@ -141,6 +127,9 @@ export async function llmParse(
   }
 
   const firstUserContent = `now: ${now.toISOString()}\n${summariseTodaysRecords(now)}\nparent said: ${text}`;
+
+  console.log({ firstUserContent });
+
   const messages: Anthropic.Messages.MessageParam[] = [
     { role: "user", content: firstUserContent },
   ];

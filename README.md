@@ -1,6 +1,6 @@
-# Clement — Baby Routines
+# babyone — Baby Routines
 
-A calm, sage-toned app for tracking a newborn's daily routines via an LLM chat.
+A calm, sage-toned app for tracking a newborn's daily routines via an LLM chat. The chat assistant takes the voice of a professional, experienced caregiver and writes records on the parent's behalf through MCP tools.
 
 ## Stack
 
@@ -70,6 +70,7 @@ server/                  Hono + SQLite + LLM proxy
   src/seed.ts            Default baby seed
   src/llm.ts             Claude-backed parser (rule-based fallback)
   src/parser.ts          Rule-based fallback parser
+  src/prompts/           System prompt(s) for the chat assistant
   src/types.ts           Shared server types
   src/mcp/               MCP server + client wiring
 client/                  Vite + React + TS
