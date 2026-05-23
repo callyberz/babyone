@@ -119,6 +119,9 @@ interface LogRecordInput {
   title: string;
   detail?: string;
   meta?: Record<string, unknown>;
+  // Injected by the chat backend from the session — NOT part of the public
+  // tool schema, so the LLM can't supply it. Attribution for records.user_id.
+  _loggerId?: number | null;
 }
 
 interface UpdateRecordInput {
@@ -168,6 +171,7 @@ function handleLogRecord(input: LogRecordInput): ToolHandlerResult {
     title: input.title,
     detail: input.detail ?? "",
     meta: input.meta ?? {},
+    userId: input._loggerId ?? null,
   });
   return {
     result: { id: rec.id, type: rec.type, at: rec.at, title: rec.title },

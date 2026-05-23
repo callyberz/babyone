@@ -98,6 +98,7 @@ app.get("/api/messages", (c) => c.json(listMessages()));
 app.post("/api/chat", async (c) => {
   const { text } = (await c.req.json()) as { text: string };
   const now = new Date();
+  const sessionUser = c.get("user");
 
   const userMsg = insertMessage({
     from: "user",
@@ -106,7 +107,7 @@ app.post("/api/chat", async (c) => {
     recordIds: [],
   });
 
-  const result = await llmParse(text, now);
+  const result = await llmParse(text, now, sessionUser.id);
   const recordIds = [
     ...result.created.map((r) => r.id),
     ...result.updated.map((r) => r.id),
