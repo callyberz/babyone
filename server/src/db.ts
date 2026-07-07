@@ -229,6 +229,20 @@ export const listMessages = (): ChatMessage[] =>
     db.prepare("SELECT * FROM messages ORDER BY at ASC").all() as MessageRow[]
   ).map(rowToMessage);
 
+// Most recent `limit` conversational messages (oldest first). Excludes daily
+// brief messages so they don't pollute the chat context window handed to the
+// LLM for multi-turn reference resolution.
+export const listRecentChatMessages = (limit: number): ChatMessage[] =>
+  (
+    db
+      .prepare(
+        "SELECT * FROM messages WHERE kind = 'chat' ORDER BY at DESC, id DESC LIMIT ?",
+      )
+      .all(limit) as MessageRow[]
+  )
+    .map(rowToMessage)
+    .reverse();
+
 export const insertMessage = (m: Omit<ChatMessage, "id">): ChatMessage => {
   const kind: MessageKind = m.kind ?? "chat";
   const info = db

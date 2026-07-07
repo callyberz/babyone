@@ -18,6 +18,29 @@ const SYSTEM = readFileSync(
   "utf8",
 ).trim();
 
+export interface ConversationTurn {
+  role: "user" | "assistant";
+  text: string;
+}
+
+// Builds the initial message array for a chat turn: prior conversation turns
+// followed by the current turn. Leading assistant turns are dropped because
+// the Anthropic Messages API requires the first message to have role "user".
+export function buildInitialMessages(
+  history: ConversationTurn[],
+  firstUserContent: string,
+): Anthropic.Messages.MessageParam[] {
+  let start = 0;
+  while (start < history.length && history[start]!.role === "assistant") {
+    start += 1;
+  }
+  const messages: Anthropic.Messages.MessageParam[] = history
+    .slice(start)
+    .map((t) => ({ role: t.role, content: t.text }));
+  messages.push({ role: "user", content: firstUserContent });
+  return messages;
+}
+
 interface ToolRunContext {
   now: Date;
   created: RoutineRecord[];
@@ -104,6 +127,7 @@ export async function llmParse(
   now = new Date(),
   loggerId: number | null = null,
   tzOffsetMin: number | null = null,
+  history: ConversationTurn[] = [],
 ): Promise<ParseResult> {
   if (!client) return fallbackPath(text, now, loggerId);
 
@@ -136,9 +160,7 @@ export async function llmParse(
 
   console.log({ firstUserContent });
 
-  const messages: Anthropic.Messages.MessageParam[] = [
-    { role: "user", content: firstUserContent },
-  ];
+  const messages = buildInitialMessages(history, firstUserContent);
 
   let finalText = "";
   try {
