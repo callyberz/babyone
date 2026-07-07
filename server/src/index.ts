@@ -194,7 +194,8 @@ app.use("/assets/*", serveStatic({ root: staticRoot }));
 app.get("*", serveStatic({ root: staticRoot, path: "index.html" }));
 
 const port = Number(process.env.PORT ?? 8787);
-serve({ fetch: app.fetch, port });
+const hostname = process.env.HOST ?? "0.0.0.0";
+serve({ fetch: app.fetch, port, hostname });
 console.log(
-  `[babyone] server listening on http://localhost:${port}  llm=${llmEnabled ? "claude" : "rule-based"}`,
+  `[babyone] server listening on http://${hostname}:${port}  llm=${llmEnabled ? "claude" : "rule-based"}`,
 );
