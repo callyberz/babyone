@@ -43,7 +43,7 @@ export interface ChatMessage {
 export interface Baby {
   name: string;
   age: string;
-  weight: string;
+  weight?: string;
 }
 
 export interface User {

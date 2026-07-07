@@ -71,8 +71,7 @@ mountInviteRoutes(app, db);
 app.get("/api/baby", (c) =>
   c.json({
     name: "Clement",
-    age: "18 days",
-    weight: "7.4 lb",
+    age: "2 days",
   }),
 );
 

@@ -47,7 +47,11 @@ export function Sidebar({
         <div>
           <div className="baby-name">{baby?.name ?? "Clement"}</div>
           <div className="baby-age">
-            {baby ? `${baby.age} old · ${baby.weight}` : "—"}
+            {baby
+              ? baby.weight
+                ? `${baby.age} old · ${baby.weight}`
+                : `${baby.age} old`
+              : "—"}
           </div>
         </div>
       </div>
