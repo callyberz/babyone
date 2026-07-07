@@ -3,6 +3,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import {
+  bulkDeleteRecords,
   db,
   deleteRecord,
   findRecords,
@@ -27,6 +28,7 @@ import type { RoutineRecord } from "./types.js";
 import {
   originGuard,
   makeRequireAuth,
+  isAdmin,
   type AuthEnv,
 } from "./auth/middleware.js";
 import { mountAuthRoutes, mountInviteRoutes } from "./auth/routes.js";
@@ -91,6 +93,23 @@ app.put("/api/records/:id", async (c) => {
 app.delete("/api/records/:id", (c) => {
   deleteRecord(Number(c.req.param("id")));
   return c.json({ ok: true });
+});
+
+app.post("/api/records/bulk-delete", async (c) => {
+  const user = c.get("user");
+  if (!isAdmin(user.email)) return c.json({ error: "forbidden" }, 403);
+
+  const body = (await c.req.json().catch(() => ({}))) as { ids?: unknown };
+  const ids = body.ids;
+  if (
+    !Array.isArray(ids) ||
+    ids.length === 0 ||
+    !ids.every((id) => typeof id === "number")
+  ) {
+    return c.json({ error: "bad_request" }, 400);
+  }
+
+  return c.json({ deleted: bulkDeleteRecords(ids) });
 });
 
 app.get("/api/messages", (c) => c.json(listMessages()));

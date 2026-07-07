@@ -36,6 +36,10 @@ export const api = {
     req(`/api/records/${id}`, { method: "DELETE" }).then((r) =>
       json<{ ok: boolean }>(r),
     ),
+  bulkDeleteRecords: (ids: number[]) =>
+    post("/api/records/bulk-delete", { ids }).then((r) =>
+      json<{ deleted: number[] }>(r),
+    ),
   listMessages: () => req("/api/messages").then((r) => json<ChatMessage[]>(r)),
   brief: () =>
     post("/api/brief/today", {

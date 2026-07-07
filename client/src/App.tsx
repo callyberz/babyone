@@ -11,6 +11,7 @@ import { TrendsScreen } from "./components/TrendsScreen";
 import type { View } from "./components/views";
 import {
   useBaby,
+  useBulkDeleteRecords,
   useDeleteRecord,
   useRecords,
   useUpdateRecord,
@@ -61,6 +62,7 @@ function AuthenticatedApp({ user }: { user: User }) {
   const babyQuery = useBaby();
   const updateRecordMut = useUpdateRecord();
   const deleteRecordMut = useDeleteRecord();
+  const bulkDeleteRecordsMut = useBulkDeleteRecords();
 
   const records = recordsQuery.data ?? [];
   const baby = babyQuery.data ?? null;
@@ -78,6 +80,7 @@ function AuthenticatedApp({ user }: { user: User }) {
   const updateRecord = (r: RoutineRecord) => updateRecordMut.mutate(r);
   const deleteRecord = (id: number) =>
     deleteRecordMut.mutate(id, { onSuccess: () => setEditing(null) });
+  const bulkDeleteRecords = (ids: number[]) => bulkDeleteRecordsMut.mutate(ids);
 
   return (
     <div className="app">
@@ -111,7 +114,12 @@ function AuthenticatedApp({ user }: { user: User }) {
         <div className="screen">
           {view === "chat" && <ChatScreen records={records} />}
           {view === "today" && (
-            <TodayScreen records={records} openRecord={setEditing} />
+            <TodayScreen
+              records={records}
+              openRecord={setEditing}
+              isAdmin={user.isAdmin}
+              onBulkDelete={bulkDeleteRecords}
+            />
           )}
           {view === "dash" && (
             <DashScreen records={records} setView={setView} />

@@ -50,6 +50,7 @@ export interface User {
   id: number;
   email: string;
   displayName: string;
+  isAdmin: boolean;
 }
 
 export interface Category {

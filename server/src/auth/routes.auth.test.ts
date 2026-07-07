@@ -53,7 +53,12 @@ describe("POST /api/auth/login", () => {
     });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
-      user: { id: 1, email: "alice@example.com", displayName: "Alice" },
+      user: {
+        id: 1,
+        email: "alice@example.com",
+        displayName: "Alice",
+        isAdmin: false,
+      },
     });
     expect(res.headers.get("set-cookie")).toMatch(/bo_sid=/);
     expect(res.headers.get("set-cookie")).toMatch(/HttpOnly/i);
@@ -119,7 +124,12 @@ describe("GET /api/auth/me", () => {
     });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
-      user: { id: 1, email: "alice@example.com", displayName: "Alice" },
+      user: {
+        id: 1,
+        email: "alice@example.com",
+        displayName: "Alice",
+        isAdmin: false,
+      },
     });
   });
 });

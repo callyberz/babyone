@@ -5,6 +5,11 @@ import { findSession } from "./sessions.js";
 
 const WRITE_METHODS = new Set(["POST", "PUT", "DELETE", "PATCH"]);
 
+export function isAdmin(email: string): boolean {
+  const adminEmail = process.env.BABYONE_ADMIN_EMAIL;
+  return !!adminEmail && email.toLowerCase() === adminEmail.toLowerCase();
+}
+
 export const originGuard: MiddlewareHandler = async (c, next) => {
   if (WRITE_METHODS.has(c.req.method)) {
     const allowed = process.env.BABYONE_ORIGIN;

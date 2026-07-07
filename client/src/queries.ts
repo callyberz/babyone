@@ -58,6 +58,19 @@ export function useDeleteRecord() {
   });
 }
 
+export function useBulkDeleteRecords() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.bulkDeleteRecords,
+    onSuccess: (res) => {
+      const deleted = new Set(res.deleted);
+      qc.setQueryData<RoutineRecord[]>(recordsKey, (rs) =>
+        (rs ?? []).filter((r) => !deleted.has(r.id)),
+      );
+    },
+  });
+}
+
 export function useBrief() {
   const me = useMe();
   // Date in the key so it re-fires once the calendar day rolls over.

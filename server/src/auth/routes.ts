@@ -10,7 +10,7 @@ import {
 } from "./sessions.js";
 import { createInvite, consumeInvite } from "./invites.js";
 import { LoginRateLimiter } from "./rateLimit.js";
-import type { AuthEnv } from "./middleware.js";
+import { isAdmin, type AuthEnv } from "./middleware.js";
 
 const COOKIE = "bo_sid";
 
@@ -57,8 +57,7 @@ export function mountAuthRoutes(
         "SELECT id, password_hash, display_name FROM users WHERE email = ?",
       )
       .get(email) as
-      | { id: number; password_hash: string; display_name: string }
-      | undefined;
+      { id: number; password_hash: string; display_name: string } | undefined;
 
     const ok = row
       ? await verifyPassword(row.password_hash, password)
@@ -72,7 +71,12 @@ export function mountAuthRoutes(
     const sid = createSession(db, row.id, c.req.header("User-Agent") ?? "");
     setCookie(c, COOKIE, sid, cookieOpts(SESSION_TTL_MS));
     return c.json({
-      user: { id: row.id, email, displayName: row.display_name },
+      user: {
+        id: row.id,
+        email,
+        displayName: row.display_name,
+        isAdmin: isAdmin(email),
+      },
     });
   });
 
@@ -111,7 +115,7 @@ export function mountAuthRoutes(
       const sid = createSession(db, userId, c.req.header("User-Agent") ?? "");
       setCookie(c, COOKIE, sid, cookieOpts(SESSION_TTL_MS));
       return c.json({
-        user: { id: userId, email, displayName },
+        user: { id: userId, email, displayName, isAdmin: isAdmin(email) },
       });
     } catch (err: unknown) {
       const msg = (err as { message?: string }).message ?? "";
@@ -138,7 +142,12 @@ export function mountAuthRoutes(
     const row = findSession(db, sid);
     if (!row) return c.json({ error: "unauthenticated" }, 401);
     return c.json({
-      user: { id: row.userId, email: row.email, displayName: row.displayName },
+      user: {
+        id: row.userId,
+        email: row.email,
+        displayName: row.displayName,
+        isAdmin: isAdmin(row.email),
+      },
     });
   });
 }

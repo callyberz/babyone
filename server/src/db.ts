@@ -174,8 +174,7 @@ export const findRecords = (opts: {
 
 export const getRecord = (id: number): RoutineRecord | null => {
   const row = db.prepare(`${BASE_SELECT} WHERE r.id = ?`).get(id) as
-    | RecordRow
-    | undefined;
+    RecordRow | undefined;
   return row ? rowToRecord(row) : null;
 };
 
@@ -217,6 +216,14 @@ export const deleteRecord = (id: number): void => {
   db.prepare("DELETE FROM records WHERE id=?").run(id);
 };
 
+export const bulkDeleteRecords = (ids: number[]): number[] => {
+  const stmt = db.prepare("DELETE FROM records WHERE id=?");
+  const tx = db.transaction((rowIds: number[]) =>
+    rowIds.filter((id) => stmt.run(id).changes > 0),
+  );
+  return tx(ids);
+};
+
 export const listMessages = (): ChatMessage[] =>
   (
     db.prepare("SELECT * FROM messages ORDER BY at ASC").all() as MessageRow[]
@@ -244,8 +251,7 @@ export const hasBriefInRange = (startIso: string, endIso: string): boolean => {
 
 export const getKv = (k: string): string | null => {
   const row = db.prepare("SELECT v FROM kv WHERE k=?").get(k) as
-    | { v: string }
-    | undefined;
+    { v: string } | undefined;
   return row?.v ?? null;
 };
 
@@ -255,8 +261,7 @@ export const setKv = (k: string, v: string): void => {
 
 export const isSeeded = (): boolean => {
   const row = db.prepare("SELECT v FROM kv WHERE k=?").get("seeded") as
-    | { v: string }
-    | undefined;
+    { v: string } | undefined;
   return row?.v === "1";
 };
 
