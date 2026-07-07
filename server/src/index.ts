@@ -114,7 +114,10 @@ app.post("/api/records/bulk-delete", async (c) => {
 app.get("/api/messages", (c) => c.json(listMessages()));
 
 app.post("/api/chat", async (c) => {
-  const { text } = (await c.req.json()) as { text: string };
+  const { text, tzOffsetMin } = (await c.req.json()) as {
+    text: string;
+    tzOffsetMin?: number;
+  };
   const now = new Date();
   const sessionUser = c.get("user");
 
@@ -125,7 +128,12 @@ app.post("/api/chat", async (c) => {
     recordIds: [],
   });
 
-  const result = await llmParse(text, now, sessionUser.id);
+  const result = await llmParse(
+    text,
+    now,
+    sessionUser.id,
+    typeof tzOffsetMin === "number" ? tzOffsetMin : null,
+  );
   const recordIds = [
     ...result.created.map((r) => r.id),
     ...result.updated.map((r) => r.id),

@@ -47,7 +47,10 @@ export const api = {
       tzOffsetMin: new Date().getTimezoneOffset(),
     }).then((r) => json<{ message: ChatMessage | null }>(r)),
   chat: (text: string) =>
-    post("/api/chat", { text }).then((r) =>
+    post("/api/chat", {
+      text,
+      tzOffsetMin: new Date().getTimezoneOffset(),
+    }).then((r) =>
       json<{
         userMsg: ChatMessage;
         botMsg: ChatMessage;

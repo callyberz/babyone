@@ -103,6 +103,7 @@ export async function llmParse(
   text: string,
   now = new Date(),
   loggerId: number | null = null,
+  tzOffsetMin: number | null = null,
 ): Promise<ParseResult> {
   if (!client) return fallbackPath(text, now, loggerId);
 
@@ -126,7 +127,12 @@ export async function llmParse(
     return fallbackPath(text, now, loggerId);
   }
 
-  const firstUserContent = `now: ${now.toISOString()}\n${summariseTodaysRecords(now)}\nparent said: ${text}`;
+  const localNowLine =
+    typeof tzOffsetMin === "number"
+      ? `local now: ${new Date(now.getTime() - tzOffsetMin * 60_000).toISOString().slice(0, 19)}\n`
+      : "";
+
+  const firstUserContent = `now: ${now.toISOString()}\n${localNowLine}${summariseTodaysRecords(now)}\nparent said: ${text}`;
 
   console.log({ firstUserContent });
 
@@ -183,6 +189,14 @@ export async function llmParse(
         // stamp records.user_id.
         if (tu.name === "log_record" && loggerId != null) {
           args._loggerId = loggerId;
+        }
+        // Injected server-side so the MCP server can convert the model's
+        // local-wall-clock `at` into the correct UTC instant.
+        if (
+          (tu.name === "log_record" || tu.name === "update_record") &&
+          typeof tzOffsetMin === "number"
+        ) {
+          args._tzOffsetMin = tzOffsetMin;
         }
         console.log("[llm] tool_use:", tu.name, JSON.stringify(args));
         try {

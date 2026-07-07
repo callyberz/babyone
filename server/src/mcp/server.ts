@@ -28,6 +28,10 @@ interface LogRecordInput {
   // Injected by the chat backend from the session — NOT part of the public
   // tool schema, so the LLM can't supply it. Attribution for records.user_id.
   _loggerId?: number | null;
+  // Injected by the chat backend — the parent's Date#getTimezoneOffset() at
+  // send time. Lets us treat `at` as the parent's local wall-clock time
+  // instead of trusting the model to convert to UTC itself.
+  _tzOffsetMin?: number;
 }
 
 interface UpdateRecordInput {
@@ -37,6 +41,7 @@ interface UpdateRecordInput {
   title?: string;
   detail?: string;
   meta?: Record<string, unknown>;
+  _tzOffsetMin?: number;
 }
 
 interface DeleteRecordInput {
@@ -56,6 +61,24 @@ function asJsonText(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
+// The model reports `at` as the parent's local wall-clock time
+// ("2026-07-06T14:35:00", no offset) — it's a text-parsing task the model is
+// good at, not arithmetic it's prone to botch. We do the UTC conversion here,
+// deterministically, the same way brief.ts turns a local date into a UTC
+// window: localAsUtcMs + tzOffsetMin*60000.
+const HAS_TZ_MARKER = /Z$|[+-]\d{2}:\d{2}$/;
+
+function resolveAt(
+  at: string | undefined,
+  tzOffsetMin: number | undefined,
+): string | undefined {
+  if (!at) return undefined;
+  if (HAS_TZ_MARKER.test(at) || typeof tzOffsetMin !== "number") return at;
+  const localAsUtcMs = Date.parse(`${at}Z`);
+  if (Number.isNaN(localAsUtcMs)) return at;
+  return new Date(localAsUtcMs + tzOffsetMin * 60_000).toISOString();
+}
+
 function handleLogRecord(input: LogRecordInput): ToolHandlerResult {
   const type = normaliseRecordType(input.type);
   if (!type) {
@@ -73,7 +96,7 @@ function handleLogRecord(input: LogRecordInput): ToolHandlerResult {
   }
   const rec = insertRecord({
     type,
-    at: input.at ?? new Date().toISOString(),
+    at: resolveAt(input.at, input._tzOffsetMin) ?? new Date().toISOString(),
     title: input.title,
     detail: input.detail ?? "",
     meta: input.meta ?? {},
@@ -103,7 +126,7 @@ function handleUpdateRecord(input: UpdateRecordInput): ToolHandlerResult {
   const merged: RoutineRecord = {
     id: existing.id,
     type: nextType,
-    at: input.at ?? existing.at,
+    at: resolveAt(input.at, input._tzOffsetMin) ?? existing.at,
     title: input.title ?? existing.title,
     detail: input.detail ?? existing.detail,
     meta: input.meta ? { ...existing.meta, ...input.meta } : existing.meta,

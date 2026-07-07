@@ -16,7 +16,7 @@ export const TOOLS: Tool[] = [
         at: {
           type: "string",
           description:
-            "ISO-8601 timestamp the event happened. Omit to use now.",
+            "The parent's LOCAL wall-clock time the event happened, as an ISO-8601 string with NO timezone suffix (e.g. '2026-07-06T14:35:00') — use the 'local now' value from the user message to fill in today's date. Do not convert to UTC or add a 'Z'; the backend does that conversion. Omit entirely to use the current time.",
         },
         title: {
           type: "string",
@@ -50,7 +50,11 @@ export const TOOLS: Tool[] = [
           description:
             "Short snake_case category. Same rules as log_record.type.",
         },
-        at: { type: "string", description: "ISO-8601 timestamp." },
+        at: {
+          type: "string",
+          description:
+            "The parent's LOCAL wall-clock time, ISO-8601 with NO timezone suffix. Same rules as log_record.at.",
+        },
         title: { type: "string" },
         detail: { type: "string" },
         meta: { type: "object", additionalProperties: true },
