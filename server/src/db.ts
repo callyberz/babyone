@@ -172,6 +172,35 @@ export const findRecords = (opts: {
   return (db.prepare(sql).all(...params) as RecordRow[]).map(rowToRecord);
 };
 
+// Guards against the LLM re-logging an event it already logged in an earlier
+// turn (the flattened-history failure mode). Returns an existing record with
+// the same type + title whose timestamp is within `windowMs` of `at`, or null.
+// Re-logs reproduce the exact same type/title/at, so this matches them
+// deterministically; the window also catches same-turn "now" double-logs whose
+// timestamps differ by seconds.
+export const findDuplicateRecord = (opts: {
+  type: string;
+  at: string;
+  title: string;
+  windowMs?: number;
+}): RoutineRecord | null => {
+  const window = opts.windowMs ?? 120_000;
+  const atMs = Date.parse(opts.at);
+  if (Number.isNaN(atMs)) return null;
+  const rows = db
+    .prepare(
+      `${BASE_SELECT} WHERE r.type = ? AND r.title = ? ORDER BY r.at DESC LIMIT 50`,
+    )
+    .all(opts.type, opts.title) as RecordRow[];
+  for (const row of rows) {
+    const existingMs = Date.parse(row.at);
+    if (!Number.isNaN(existingMs) && Math.abs(existingMs - atMs) <= window) {
+      return rowToRecord(row);
+    }
+  }
+  return null;
+};
+
 export const getRecord = (id: number): RoutineRecord | null => {
   const row = db.prepare(`${BASE_SELECT} WHERE r.id = ?`).get(id) as
     RecordRow | undefined;

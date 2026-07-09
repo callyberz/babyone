@@ -7,6 +7,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import {
   deleteRecord,
+  findDuplicateRecord,
   findRecords,
   getRecord,
   insertRecord,
@@ -79,7 +80,7 @@ function resolveAt(
   return new Date(localAsUtcMs + tzOffsetMin * 60_000).toISOString();
 }
 
-function handleLogRecord(input: LogRecordInput): ToolHandlerResult {
+export function handleLogRecord(input: LogRecordInput): ToolHandlerResult {
   const type = normaliseRecordType(input.type);
   if (!type) {
     return {
@@ -94,9 +95,26 @@ function handleLogRecord(input: LogRecordInput): ToolHandlerResult {
       isError: true,
     };
   }
+  const at =
+    resolveAt(input.at, input._tzOffsetMin) ?? new Date().toISOString();
+  // Hard guarantee against duplicates: if this exact event was already logged
+  // (e.g. the model re-emitted log_record for an earlier turn's event), return
+  // the existing record instead of inserting a second row.
+  const existing = findDuplicateRecord({ type, at, title: input.title });
+  if (existing) {
+    return {
+      result: {
+        id: existing.id,
+        type: existing.type,
+        at: existing.at,
+        title: existing.title,
+        deduped: true,
+      },
+    };
+  }
   const rec = insertRecord({
     type,
-    at: resolveAt(input.at, input._tzOffsetMin) ?? new Date().toISOString(),
+    at,
     title: input.title,
     detail: input.detail ?? "",
     meta: input.meta ?? {},

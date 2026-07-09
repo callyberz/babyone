@@ -110,13 +110,13 @@ function trackToolEffect(
   if (outcome.isError) return;
   if (name === "log_record") {
     const id = extractIdFromText(outcome.text);
-    if (id != null) {
+    if (id != null && !ctx.created.some((r) => r.id === id)) {
       const rec = getRecord(id);
       if (rec) ctx.created.push(rec);
     }
   } else if (name === "update_record") {
     const id = extractIdFromText(outcome.text);
-    if (id != null) {
+    if (id != null && !ctx.updated.some((r) => r.id === id)) {
       const rec = getRecord(id);
       if (rec) ctx.updated.push(rec);
     }
