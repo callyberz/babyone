@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { RecordType, RoutineRecord, KnownRecordType } from "../types";
 import { categories, getCategory } from "../types";
-import { fmtDay, fmtTime } from "../utils";
+import { fmtDay, fmtTime, recordChips } from "../utils";
 
 type Filter = "all" | RecordType;
 
@@ -97,6 +97,7 @@ export function TodayScreen({
           <div className="tl">
             {g.items.map((r) => {
               const cat = getCategory(r.type);
+              const chips = recordChips(r);
               return (
                 <div className="tl-item" key={r.id}>
                   <div className="tl-dot" style={{ borderColor: cat.tint }} />
@@ -123,6 +124,25 @@ export function TodayScreen({
                     </div>
                     <div className="tl-body">
                       <div className="tl-title">{r.title}</div>
+                      {chips.length > 0 && (
+                        <div className="tl-chips">
+                          {chips.map((c, i) => (
+                            <span
+                              className="tl-chip"
+                              key={i}
+                              style={{
+                                background: `${cat.tint}1f`,
+                                color: cat.tint,
+                              }}
+                            >
+                              {c.icon && (
+                                <span className="tl-chip-ico">{c.icon}</span>
+                              )}
+                              {c.text}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                       {r.detail && <div className="tl-detail">{r.detail}</div>}
                     </div>
                     <div className="tl-tag">{cat.label}</div>
