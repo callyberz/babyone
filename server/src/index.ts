@@ -122,14 +122,6 @@ app.post("/api/chat", async (c) => {
   const now = new Date();
   const sessionUser = c.get("user");
 
-  // Gather the recent conversation (~5 turns) BEFORE inserting the current
-  // message so the model can resolve references like "I mean Jul 7 morning"
-  // back to earlier turns. Without this each turn is stateless.
-  const history = listRecentChatMessages(10).map((m) => ({
-    role: m.from === "user" ? ("user" as const) : ("assistant" as const),
-    text: m.text,
-  }));
-
   const userMsg = insertMessage({
     from: "user",
     at: now.toISOString(),
@@ -142,7 +134,6 @@ app.post("/api/chat", async (c) => {
     now,
     sessionUser.id,
     typeof tzOffsetMin === "number" ? tzOffsetMin : null,
-    history,
   );
   const recordIds = [
     ...result.created.map((r) => r.id),

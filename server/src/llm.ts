@@ -9,8 +9,12 @@ import { callMcpTool, getAnthropicToolSchemas } from "./mcp/client.js";
 
 const apiKey = process.env.ANTHROPIC_API_KEY;
 const client = apiKey ? new Anthropic({ apiKey }) : null;
-const MODEL = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6";
+const MODEL = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5";
 const MAX_ITERATIONS = 5;
+// Sonnet 5 runs adaptive thinking by default (Sonnet 4.6 ran thinking-off when
+// omitted). Thinking shares this budget with tool calls + text, so 1024 risks
+// truncating a turn mid-tool-call — give it headroom.
+const MAX_TOKENS = 4096;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SYSTEM = readFileSync(
@@ -167,7 +171,7 @@ export async function llmParse(
     for (let i = 0; i < MAX_ITERATIONS; i++) {
       const res = await client.messages.create({
         model: MODEL,
-        max_tokens: 1024,
+        max_tokens: MAX_TOKENS,
         system: SYSTEM,
         tools: toolSchemas,
         messages,

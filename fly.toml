@@ -12,6 +12,7 @@ primary_region = 'yyz'
 [env]
   BABYONE_DB = '/data/data.db'
   PORT = '8080'
+  ANTHROPIC_MODEL = 'claude-sonnet-5'
 
 [[mounts]]
   source = 'babyone_data'
