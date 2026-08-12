@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import type DatabaseT from "better-sqlite3";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { KNOWN_RECORD_TYPES } from "./types.js";
 import type {
   ChatMessage,
   MessageKind,
@@ -17,6 +18,7 @@ export function applyAuthSchema(d: DatabaseT.Database): void {
       email         TEXT NOT NULL UNIQUE COLLATE NOCASE,
       password_hash TEXT NOT NULL,
       display_name  TEXT NOT NULL,
+      role          TEXT NOT NULL DEFAULT 'caregiver' CHECK (role IN ('administrator','caregiver')),
       created_at    TEXT NOT NULL
     );
 
@@ -39,6 +41,19 @@ export function applyAuthSchema(d: DatabaseT.Database): void {
     );
   `);
 
+  const userCols = d.prepare("PRAGMA table_info(users)").all() as {
+    name: string;
+  }[];
+  if (!userCols.some((column) => column.name === "role")) {
+    d.exec(
+      "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'caregiver'",
+    );
+    // The first account was the legacy environment-derived administrator.
+    d.prepare(
+      "UPDATE users SET role = 'administrator' WHERE id = (SELECT id FROM users ORDER BY id LIMIT 1)",
+    ).run();
+  }
+
   const cols = d.prepare("PRAGMA table_info(records)").all() as {
     name: string;
   }[];
@@ -56,42 +71,44 @@ export const db = new Database(dbPath);
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS records (
-    id     INTEGER PRIMARY KEY AUTOINCREMENT,
-    type   TEXT NOT NULL,
-    at     TEXT NOT NULL,
-    title  TEXT NOT NULL,
-    detail TEXT NOT NULL DEFAULT '',
-    meta   TEXT NOT NULL DEFAULT '{}'
-  );
-  CREATE INDEX IF NOT EXISTS idx_records_at ON records(at DESC);
+export function applyCoreSchema(d: DatabaseT.Database): void {
+  d.exec(`
+    CREATE TABLE IF NOT EXISTS records (
+      id     INTEGER PRIMARY KEY AUTOINCREMENT,
+      type   TEXT NOT NULL,
+      at     TEXT NOT NULL,
+      title  TEXT NOT NULL,
+      detail TEXT NOT NULL DEFAULT '',
+      meta   TEXT NOT NULL DEFAULT '{}'
+    );
+    CREATE INDEX IF NOT EXISTS idx_records_at ON records(at DESC);
 
-  CREATE TABLE IF NOT EXISTS messages (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    sender      TEXT NOT NULL CHECK (sender IN ('user','bot')),
-    at          TEXT NOT NULL,
-    text        TEXT NOT NULL,
-    record_ids  TEXT NOT NULL DEFAULT '[]',
-    kind        TEXT NOT NULL DEFAULT 'chat'
-  );
-  CREATE INDEX IF NOT EXISTS idx_messages_at ON messages(at ASC);
+    CREATE TABLE IF NOT EXISTS messages (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      sender      TEXT NOT NULL CHECK (sender IN ('user','bot')),
+      at          TEXT NOT NULL,
+      text        TEXT NOT NULL,
+      record_ids  TEXT NOT NULL DEFAULT '[]',
+      kind        TEXT NOT NULL DEFAULT 'chat'
+    );
+    CREATE INDEX IF NOT EXISTS idx_messages_at ON messages(at ASC);
 
-  CREATE TABLE IF NOT EXISTS kv (
-    k TEXT PRIMARY KEY,
-    v TEXT NOT NULL
-  );
-`);
+    CREATE TABLE IF NOT EXISTS kv (
+      k TEXT PRIMARY KEY,
+      v TEXT NOT NULL
+    );
+  `);
 
-applyAuthSchema(db);
-
-// Migrate pre-existing databases whose `messages` table predates the `kind` column.
-const messageColumns = db.prepare("PRAGMA table_info(messages)").all() as {
-  name: string;
-}[];
-if (!messageColumns.some((col) => col.name === "kind")) {
-  db.exec("ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'");
+  applyAuthSchema(d);
+  const messageColumns = d.prepare("PRAGMA table_info(messages)").all() as {
+    name: string;
+  }[];
+  if (!messageColumns.some((column) => column.name === "kind")) {
+    d.exec("ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'");
+  }
 }
+
+applyCoreSchema(db);
 
 interface RecordRow {
   id: number;
@@ -115,16 +132,23 @@ interface MessageRow {
 
 const rowToRecord = (r: RecordRow): RoutineRecord => ({
   id: r.id,
-  type: r.type as RecordType,
+  type: (KNOWN_RECORD_TYPES as readonly string[]).includes(r.type)
+    ? (r.type as RecordType)
+    : "other",
   at: r.at,
   title: r.title,
   detail: r.detail,
-  meta: JSON.parse(r.meta) as RecordMeta,
+  meta: (() => {
+    const meta = JSON.parse(r.meta) as RecordMeta;
+    return (KNOWN_RECORD_TYPES as readonly string[]).includes(r.type)
+      ? meta
+      : { ...meta, category: r.type };
+  })(),
   user:
     r.user_id !== null && r.user_display_name !== null
       ? { id: r.user_id, displayName: r.user_display_name }
       : null,
-});
+}) as RoutineRecord;
 
 const BASE_SELECT =
   "SELECT r.*, u.display_name AS user_display_name FROM records r " +
@@ -238,7 +262,7 @@ export const updateRecord = (r: RoutineRecord): RoutineRecord => {
     JSON.stringify(r.meta ?? {}),
     r.id,
   );
-  return r;
+  return getRecord(r.id)!;
 };
 
 export const deleteRecord = (id: number): void => {
@@ -319,6 +343,7 @@ export interface UserRow {
   id: number;
   email: string;
   display_name: string;
+  role: "administrator" | "caregiver";
 }
 
 export const countUsers = (): number =>

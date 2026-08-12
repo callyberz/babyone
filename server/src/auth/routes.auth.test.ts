@@ -73,6 +73,16 @@ describe("POST /api/auth/login", () => {
     expect(res.status).toBe(200);
   });
 
+  it("uses the persisted administrator role after bootstrap vars are removed", async () => {
+    db.prepare("UPDATE users SET role = 'administrator' WHERE id = 1").run();
+    delete process.env.BABYONE_ADMIN_EMAIL;
+    const res = await post("/api/auth/login", {
+      email: "alice@example.com",
+      password: "hunter22",
+    });
+    expect(await res.json()).toMatchObject({ user: { isAdmin: true } });
+  });
+
   it("401s on wrong password (same shape as unknown email)", async () => {
     const a = await post("/api/auth/login", {
       email: "alice@example.com",

@@ -59,8 +59,8 @@ export function ruleBasedParse(
     return {
       draft,
       replyText: dirty
-        ? "Logged a dirty diaper. That's good news for digestion."
-        : "Logged a wet diaper. Hydration's tracking well today.",
+        ? "Logged a dirty diaper."
+        : "Logged a wet diaper.",
     };
   }
 
@@ -84,7 +84,7 @@ export function ruleBasedParse(
     };
     return {
       draft,
-      replyText: `Logged ${mins} minutes of sleep. ${mins >= 90 ? "Solid stretch! 💤" : "Short nap — wake window's probably about 1 hour next."}`,
+      replyText: `Logged ${mins} minutes of sleep.`,
     };
   }
 
@@ -102,7 +102,7 @@ export function ruleBasedParse(
     };
     return {
       draft,
-      replyText: `Got it — ${vol} oz logged. Next feed likely in about 2.5 hours.`,
+      replyText: `Logged a ${vol} oz bottle.`,
     };
   }
 
@@ -118,7 +118,7 @@ export function ruleBasedParse(
     };
     return {
       draft,
-      replyText: `Logged a ${mins}-minute feed. ${mins >= 20 ? "Sounds like a full one." : "Might want to offer more soon if he stirs."}`,
+      replyText: `Logged a ${mins}-minute feed.`,
     };
   }
 
@@ -135,7 +135,7 @@ export function ruleBasedParse(
       draft,
       replyText: /lift|rolled|smiled/.test(t)
         ? "That's a milestone — saved it. 🎉"
-        : `${mins} minutes of tummy time logged. Building those neck muscles.`,
+        : `${mins} minutes of tummy time logged.`,
     };
   }
 
@@ -151,8 +151,8 @@ export function ruleBasedParse(
     return {
       draft,
       replyText: positive
-        ? "Lovely — noted ✨"
-        : "Logged. Often these line up with longer wake windows — I'll watch the pattern.",
+        ? "Happy mood logged."
+        : "Fussy mood logged.",
     };
   }
 
@@ -166,7 +166,7 @@ export function ruleBasedParse(
     };
     return {
       draft,
-      replyText: "Logged. I'll remind you again tomorrow at the same time.",
+      replyText: "Medication entry logged.",
     };
   }
 

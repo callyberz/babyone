@@ -69,7 +69,7 @@ export function TodayScreen({
         className="chart-tabs"
         style={{ flexWrap: "wrap", justifyContent: "space-between" }}
       >
-        <div style={{ display: "flex", flexWrap: "wrap" }}>
+        <div className="cluster-wrap">
           {filters.map(([k, label]) => (
             <button
               key={k}

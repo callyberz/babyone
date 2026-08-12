@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "workspaces": [
+    "packages/contracts",
     "server",
     "client"
   ],
@@ -10,7 +11,8 @@
     "dev": "npm-run-all -p dev:server dev:client",
     "dev:server": "npm --workspace server run dev",
     "dev:client": "npm --workspace client run dev",
-    "build": "npm --workspace server run build && npm --workspace client run build",
+    "build": "npm --workspace @babyone/contracts run build && npm --workspace server run build && npm --workspace client run build",
+    "test": "npm test --workspaces --if-present",
     "start": "npm --workspace server run start"
   },
   "devDependencies": {

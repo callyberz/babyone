@@ -13,11 +13,23 @@ const insertRecordMock = vi.fn((r: Record<string, unknown>) => ({
   meta: r.meta ?? {},
   user: null,
 }));
+const getRecordMock = vi.fn((id: number) => ({
+  id,
+  type: "feed",
+  at: "2026-06-01T12:00:00.000Z",
+  title: "Bottle — 3 oz",
+  detail: "",
+  meta: { volume_oz: 3 },
+  user: null,
+}));
 
 vi.mock("../db.js", () => ({
   insertRecord: insertRecordMock,
   findRecords: () => [],
-  getRecord: () => null,
+  getRecord: getRecordMock,
+  findDuplicateRecord: () => null,
+  updateRecord: (record: unknown) => record,
+  deleteRecord: () => {},
 }));
 
 // llm.ts checks ANTHROPIC_API_KEY at import time. Clear it so we go down

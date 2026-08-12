@@ -20,7 +20,9 @@ export function RecordModal({
   const setField = <K extends keyof RoutineRecord>(k: K, v: RoutineRecord[K]) =>
     setDraft((d) => ({ ...d, [k]: v }));
   const setMeta = (k: string, v: unknown) =>
-    setDraft((d) => ({ ...d, meta: { ...d.meta, [k]: v } }));
+    setDraft(
+      (d) => ({ ...d, meta: { ...d.meta, [k]: v } }) as RoutineRecord,
+    );
 
   const atDate = new Date(draft.at);
   const timeStr = `${String(atDate.getHours()).padStart(2, "0")}:${String(atDate.getMinutes()).padStart(2, "0")}`;
@@ -35,7 +37,7 @@ export function RecordModal({
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-h">
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div className="cluster">
             <div
               className="tl-ico"
               style={{

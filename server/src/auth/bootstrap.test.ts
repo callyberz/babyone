@@ -28,8 +28,13 @@ describe("bootstrapAdmin", () => {
       displayName: "Admin",
     });
     expect(id).toBeGreaterThan(0);
-    const u = db.prepare("SELECT email FROM users WHERE id = ?").get(id);
-    expect(u).toEqual({ email: "admin@example.com" });
+    const u = db
+      .prepare("SELECT email, role FROM users WHERE id = ?")
+      .get(id);
+    expect(u).toEqual({
+      email: "admin@example.com",
+      role: "administrator",
+    });
   });
 
   it("returns null and does nothing when users already exist", async () => {

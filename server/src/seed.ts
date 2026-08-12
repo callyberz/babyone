@@ -44,7 +44,7 @@ export async function bootstrapAdmin(
   const hash = await hashPassword(creds.password);
   const info = db
     .prepare(
-      "INSERT INTO users (email, password_hash, display_name, created_at) VALUES (?, ?, ?, ?)",
+      "INSERT INTO users (email, password_hash, display_name, role, created_at) VALUES (?, ?, ?, 'administrator', ?)",
     )
     .run(creds.email, hash, creds.displayName, new Date().toISOString());
   const id = Number(info.lastInsertRowid);

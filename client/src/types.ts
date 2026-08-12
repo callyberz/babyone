@@ -1,56 +1,18 @@
-export type RecordType = string;
+export type {
+  ChatMessage,
+  KnownRecordType,
+  RecordMeta,
+  RecordType,
+  RoutineRecord,
+  User,
+} from "@babyone/contracts";
 
-export const KNOWN_RECORD_TYPES = [
-  "feed",
-  "sleep",
-  "diaper",
-  "meds",
-  "play",
-  "mood",
-] as const;
-
-export type KnownRecordType = (typeof KNOWN_RECORD_TYPES)[number];
-
-export interface RecordMeta {
-  volume_oz?: number;
-  side?: "left" | "right" | "both" | "bottle";
-  mins?: number;
-  where?: string | null;
-  kind?: "wet" | "dirty" | "both" | "fussy" | "happy";
-  name?: string;
-  dose?: string;
-  [k: string]: unknown;
-}
-
-export interface RoutineRecord {
-  id: number;
-  type: RecordType;
-  at: string;
-  title: string;
-  detail: string;
-  meta: RecordMeta;
-  user?: { id: number; displayName: string } | null;
-}
-
-export interface ChatMessage {
-  id: number;
-  from: "user" | "bot";
-  at: string;
-  text: string;
-  recordIds: number[];
-}
+import type { KnownRecordType } from "@babyone/contracts";
 
 export interface Baby {
   name: string;
   age: string;
   weight?: string;
-}
-
-export interface User {
-  id: number;
-  email: string;
-  displayName: string;
-  isAdmin: boolean;
 }
 
 export interface Category {

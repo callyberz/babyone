@@ -8,10 +8,12 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
+COPY packages/contracts/package.json ./packages/contracts/
 COPY server/package.json ./server/
 COPY client/package.json ./client/
 RUN npm ci
 
+COPY packages/contracts ./packages/contracts
 COPY server ./server
 COPY client ./client
 RUN npm run build
@@ -25,6 +27,8 @@ ENV NODE_ENV=production \
 
 COPY --from=builder /app/package.json /app/package-lock.json /app/
 COPY --from=builder /app/node_modules /app/node_modules
+COPY --from=builder /app/packages/contracts/package.json /app/packages/contracts/package.json
+COPY --from=builder /app/packages/contracts/dist /app/packages/contracts/dist
 COPY --from=builder /app/server/package.json /app/server/package.json
 COPY --from=builder /app/server/dist /app/server/dist
 COPY --from=builder /app/client/package.json /app/client/package.json

@@ -8,6 +8,7 @@ export interface SessionLookup {
   userId: number;
   email: string;
   displayName: string;
+  role: "administrator" | "caregiver";
   expiresAt: string;
 }
 
@@ -36,12 +37,19 @@ export function findSession(
   const row = db
     .prepare(
       `SELECT s.id AS sid, s.user_id AS uid, s.expires_at AS exp,
-              u.email AS email, u.display_name AS name
+              u.email AS email, u.display_name AS name, u.role AS role
        FROM sessions s JOIN users u ON u.id = s.user_id
        WHERE s.id = ?`,
     )
     .get(sid) as
-    | { sid: string; uid: number; exp: string; email: string; name: string }
+    | {
+        sid: string;
+        uid: number;
+        exp: string;
+        email: string;
+        name: string;
+        role: "administrator" | "caregiver";
+      }
     | undefined;
   if (!row) return null;
   if (row.exp < new Date().toISOString()) return null;
@@ -50,6 +58,7 @@ export function findSession(
     userId: row.uid,
     email: row.email,
     displayName: row.name,
+    role: row.role,
     expiresAt: row.exp,
   };
 }

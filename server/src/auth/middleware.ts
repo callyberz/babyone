@@ -5,9 +5,8 @@ import { findSession } from "./sessions.js";
 
 const WRITE_METHODS = new Set(["POST", "PUT", "DELETE", "PATCH"]);
 
-export function isAdmin(email: string): boolean {
-  const adminEmail = process.env.BABYONE_ADMIN_EMAIL;
-  return !!adminEmail && email.toLowerCase() === adminEmail.toLowerCase();
+export function isAdmin(user: { role: string }): boolean {
+  return user.role === "administrator";
 }
 
 export const originGuard: MiddlewareHandler = async (c, next) => {
@@ -25,6 +24,7 @@ export interface AuthUser {
   id: number;
   email: string;
   displayName: string;
+  role: "administrator" | "caregiver";
 }
 
 export type AuthEnv = { Variables: { user: AuthUser } };
@@ -41,6 +41,7 @@ export function makeRequireAuth(
       id: row.userId,
       email: row.email,
       displayName: row.displayName,
+      role: row.role,
     });
     await next();
   };

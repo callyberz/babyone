@@ -1,9 +1,16 @@
-import Anthropic from "@anthropic-ai/sdk";
-import type { RoutineRecord } from "./types.js";
-
-const apiKey = process.env.ANTHROPIC_API_KEY;
-const client = apiKey ? new Anthropic({ apiKey }) : null;
-const MODEL = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6";
+import type Anthropic from "@anthropic-ai/sdk";
+import {
+  aggregateFixedDays,
+  aggregateRecords,
+  type DayAggregate,
+  type RoutineRecord,
+} from "@babyone/contracts";
+import {
+  anthropicClient as client,
+  LLM_CONFIG,
+  markLlmDegraded,
+  markLlmHealthy,
+} from "./llm/config.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -35,114 +42,16 @@ export function computeBriefWindow(
   };
 }
 
-export interface DayAgg {
-  totalRecords: number;
-  feeds: number;
-  ozTotal: number;
-  sleepMins: number;
-  longestSleepMins: number;
-  diapers: number;
-  diaperWet: number;
-  diaperDirty: number;
-  playMins: number;
-  longestFeedGapHours: number;
-  other: Record<string, number>;
-}
-
-const emptyAgg = (): DayAgg => ({
-  totalRecords: 0,
-  feeds: 0,
-  ozTotal: 0,
-  sleepMins: 0,
-  longestSleepMins: 0,
-  diapers: 0,
-  diaperWet: 0,
-  diaperDirty: 0,
-  playMins: 0,
-  longestFeedGapHours: 0,
-  other: {},
-});
-
-const CANONICAL = new Set(["feed", "sleep", "diaper", "meds", "play", "mood"]);
-
-export function aggregateDay(records: RoutineRecord[]): DayAgg {
-  const agg = emptyAgg();
-  agg.totalRecords = records.length;
-
-  const feedTimes: number[] = [];
-  for (const r of records) {
-    const mins = (r.meta?.mins as number) ?? 0;
-    if (r.type === "feed") {
-      agg.feeds++;
-      agg.ozTotal += (r.meta?.volume_oz as number) ?? 0;
-      feedTimes.push(new Date(r.at).getTime());
-    } else if (r.type === "sleep") {
-      agg.sleepMins += mins;
-      agg.longestSleepMins = Math.max(agg.longestSleepMins, mins);
-    } else if (r.type === "diaper") {
-      agg.diapers++;
-      const kind = r.meta?.kind;
-      if (kind === "wet" || kind === "both") agg.diaperWet++;
-      if (kind === "dirty" || kind === "both") agg.diaperDirty++;
-    } else if (r.type === "play") {
-      agg.playMins += mins;
-    } else if (!CANONICAL.has(r.type)) {
-      agg.other[r.type] = (agg.other[r.type] ?? 0) + 1;
-    }
-  }
-
-  feedTimes.sort((a, b) => a - b);
-  for (let i = 1; i < feedTimes.length; i++) {
-    const gapHours = (feedTimes[i] - feedTimes[i - 1]) / (60 * 60 * 1000);
-    agg.longestFeedGapHours = Math.max(agg.longestFeedGapHours, gapHours);
-  }
-
-  return agg;
-}
+export type DayAgg = DayAggregate;
+export const aggregateDay = aggregateRecords;
 
 export function aggregateBaseline(
   records: RoutineRecord[],
   windowStart: Date,
   windowEnd: Date,
 ): { days: DayAgg[]; avg: DayAgg } {
-  const startMs = windowStart.getTime();
-  const dayCount = Math.max(
-    1,
-    Math.round((windowEnd.getTime() - startMs) / DAY_MS),
-  );
-  const buckets: RoutineRecord[][] = Array.from({ length: dayCount }, () => []);
-  for (const r of records) {
-    const idx = Math.floor((new Date(r.at).getTime() - startMs) / DAY_MS);
-    if (idx >= 0 && idx < dayCount) buckets[idx].push(r);
-  }
-
-  const days = buckets.map(aggregateDay);
-  const avg = emptyAgg();
-  for (const d of days) {
-    avg.totalRecords += d.totalRecords;
-    avg.feeds += d.feeds;
-    avg.ozTotal += d.ozTotal;
-    avg.sleepMins += d.sleepMins;
-    avg.longestSleepMins += d.longestSleepMins;
-    avg.diapers += d.diapers;
-    avg.diaperWet += d.diaperWet;
-    avg.diaperDirty += d.diaperDirty;
-    avg.playMins += d.playMins;
-    avg.longestFeedGapHours += d.longestFeedGapHours;
-  }
-  const n = days.length;
-  avg.totalRecords /= n;
-  avg.feeds /= n;
-  avg.ozTotal /= n;
-  avg.sleepMins /= n;
-  avg.longestSleepMins /= n;
-  avg.diapers /= n;
-  avg.diaperWet /= n;
-  avg.diaperDirty /= n;
-  avg.playMins /= n;
-  avg.longestFeedGapHours /= n;
-
-  return { days, avg };
+  const { days, average } = aggregateFixedDays(records, windowStart, windowEnd);
+  return { days, avg: average };
 }
 
 const round = (n: number, dp = 1): number => {
@@ -177,7 +86,6 @@ export async function generateBriefText(
       diaperWet: yesterday.diaperWet,
       diaperDirty: yesterday.diaperDirty,
       playMins: yesterday.playMins,
-      longestFeedGapHours: round(yesterday.longestFeedGapHours),
       other: yesterday.other,
     },
     baseline7dAvg: {
@@ -186,14 +94,13 @@ export async function generateBriefText(
       sleepHours: round(baselineAvg.sleepMins / 60),
       diapers: round(baselineAvg.diapers),
       playMins: round(baselineAvg.playMins),
-      longestFeedGapHours: round(baselineAvg.longestFeedGapHours),
     },
   };
 
   try {
     const res = await client.messages.create({
-      model: MODEL,
-      max_tokens: 200,
+      model: LLM_CONFIG.model,
+      max_tokens: LLM_CONFIG.briefMaxTokens,
       system: SYSTEM,
       messages: [{ role: "user", content: JSON.stringify(payload) }],
     });
@@ -202,12 +109,10 @@ export async function generateBriefText(
       .map((b) => b.text)
       .join("\n")
       .trim();
+    markLlmHealthy();
     return text || fallbackText(yesterday, baselineAvg);
   } catch (err) {
-    console.warn(
-      "[brief] LLM call failed, using fallback:",
-      (err as Error).message,
-    );
+    markLlmDegraded("brief_request_failed");
     return fallbackText(yesterday, baselineAvg);
   }
 }

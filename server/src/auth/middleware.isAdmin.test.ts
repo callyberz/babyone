@@ -1,25 +1,19 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { isAdmin } from "./middleware.js";
 
 describe("isAdmin", () => {
-  beforeEach(() => {
+  it("accepts a persisted administrator role", () => {
+    expect(isAdmin({ role: "administrator" })).toBe(true);
+  });
+
+  it("rejects a persisted caregiver role", () => {
+    expect(isAdmin({ role: "caregiver" })).toBe(false);
+  });
+
+  it("does not consult bootstrap environment variables", () => {
     process.env.BABYONE_ADMIN_EMAIL = "admin@example.com";
-  });
-
-  it("true when email matches BABYONE_ADMIN_EMAIL", () => {
-    expect(isAdmin("admin@example.com")).toBe(true);
-  });
-
-  it("is case-insensitive", () => {
-    expect(isAdmin("ADMIN@example.com")).toBe(true);
-  });
-
-  it("false for any other email", () => {
-    expect(isAdmin("caregiver@example.com")).toBe(false);
-  });
-
-  it("false when BABYONE_ADMIN_EMAIL is unset", () => {
+    expect(isAdmin({ role: "caregiver" })).toBe(false);
     delete process.env.BABYONE_ADMIN_EMAIL;
-    expect(isAdmin("admin@example.com")).toBe(false);
+    expect(isAdmin({ role: "administrator" })).toBe(true);
   });
 });

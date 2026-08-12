@@ -50,7 +50,12 @@ describe("requireAuth", () => {
     });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
-      user: { id: userId, email: "a@b.c", displayName: "A" },
+      user: {
+        id: userId,
+        email: "a@b.c",
+        displayName: "A",
+        role: "caregiver",
+      },
     });
   });
 });

@@ -7,6 +7,7 @@ import {
   db,
   deleteRecord,
   findRecords,
+  getRecord,
   getKv,
   hasBriefInRange,
   insertMessage,
@@ -18,14 +19,14 @@ import {
   updateRecord,
 } from "./db.js";
 import { seedIfEmpty, bootstrapAuth } from "./seed.js";
-import { llmEnabled, llmParse } from "./llm.js";
+import { getLlmStatus, llmParse } from "./llm.js";
 import {
   aggregateBaseline,
   aggregateDay,
   computeBriefWindow,
   generateBriefText,
 } from "./brief.js";
-import type { RoutineRecord } from "./types.js";
+import { validateRecordDraft, type RoutineRecord } from "./types.js";
 import {
   originGuard,
   makeRequireAuth,
@@ -38,7 +39,7 @@ import { cleanupExpiredInvites } from "./auth/invites.js";
 
 // Seed demo data first so the admin backfill in bootstrapAuth() attributes
 // freshly-seeded records to the admin on a brand-new database.
-seedIfEmpty();
+if (process.env.BABYONE_SEED_DEMO === "1") seedIfEmpty();
 await bootstrapAuth();
 cleanupExpiredSessions(db);
 cleanupExpiredInvites(db);
@@ -59,7 +60,7 @@ app.use(
 app.use("/api/*", originGuard);
 
 // Open routes (mounted BEFORE requireAuth so they pass through).
-app.get("/api/health", (c) => c.json({ ok: true, llm: llmEnabled }));
+app.get("/api/health", (c) => c.json({ ok: true, llm: getLlmStatus() }));
 mountAuthRoutes(app, db);
 
 // Everything else under /api/* requires a valid session.
@@ -79,15 +80,31 @@ app.get("/api/baby", (c) =>
 app.get("/api/records", (c) => c.json(listRecords()));
 
 app.post("/api/records", async (c) => {
-  const body = (await c.req.json()) as Omit<RoutineRecord, "id" | "user">;
+  const body = await c.req.json().catch(() => null);
+  const validation = validateRecordDraft(body);
+  if (!validation.ok) {
+    return c.json({ error: "invalid_record", issues: validation.issues }, 400);
+  }
   const user = c.get("user");
-  return c.json(insertRecord({ ...body, userId: user.id }));
+  return c.json(insertRecord({ ...validation.value, userId: user.id }));
 });
 
 app.put("/api/records/:id", async (c) => {
   const id = Number(c.req.param("id"));
-  const body = (await c.req.json()) as Omit<RoutineRecord, "id">;
-  return c.json(updateRecord({ ...body, id }));
+  const existing = getRecord(id);
+  if (!existing) return c.json({ error: "not_found" }, 404);
+  const body = await c.req.json().catch(() => null);
+  const validation = validateRecordDraft(body);
+  if (!validation.ok) {
+    return c.json({ error: "invalid_record", issues: validation.issues }, 400);
+  }
+  return c.json(
+    updateRecord({
+      ...validation.value,
+      id,
+      user: existing.user,
+    } as RoutineRecord),
+  );
 });
 
 app.delete("/api/records/:id", (c) => {
@@ -97,7 +114,7 @@ app.delete("/api/records/:id", (c) => {
 
 app.post("/api/records/bulk-delete", async (c) => {
   const user = c.get("user");
-  if (!isAdmin(user.email)) return c.json({ error: "forbidden" }, 403);
+  if (!isAdmin(user)) return c.json({ error: "forbidden" }, 403);
 
   const body = (await c.req.json().catch(() => ({}))) as { ids?: unknown };
   const ids = body.ids;
@@ -234,5 +251,5 @@ const port = Number(process.env.PORT ?? 8787);
 const hostname = process.env.HOST ?? "0.0.0.0";
 serve({ fetch: app.fetch, port, hostname });
 console.log(
-  `[babyone] server listening on http://${hostname}:${port}  llm=${llmEnabled ? "claude" : "rule-based"}`,
+  `[babyone] server listening on http://${hostname}:${port}  llm=${getLlmStatus().state}`,
 );

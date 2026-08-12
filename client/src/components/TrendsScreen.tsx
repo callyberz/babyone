@@ -1,50 +1,10 @@
+import { aggregateLocalDays } from "@babyone/contracts";
 import type { RoutineRecord } from "../types";
 import { categories } from "../types";
 
-interface Bucket {
-  day: Date;
-  label: string;
-  feeds: number;
-  ozTotal: number;
-  sleepMins: number;
-  diapers: number;
-  playMins: number;
-}
-
 export function TrendsScreen({ records }: { records: RoutineRecord[] }) {
   const days = 7;
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const buckets: Bucket[] = [];
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - i);
-    buckets.push({
-      day: d,
-      label: d.toLocaleDateString([], { weekday: "short" }),
-      feeds: 0,
-      ozTotal: 0,
-      sleepMins: 0,
-      diapers: 0,
-      playMins: 0,
-    });
-  }
-  records.forEach((r) => {
-    const dStart = new Date(r.at);
-    dStart.setHours(0, 0, 0, 0);
-    const idx = buckets.findIndex((b) => b.day.getTime() === dStart.getTime());
-    if (idx === -1) return;
-    const b = buckets[idx];
-    if (r.type === "feed") {
-      b.feeds++;
-      b.ozTotal += (r.meta?.volume_oz as number) ?? 0;
-    }
-    if (r.type === "sleep") b.sleepMins += (r.meta?.mins as number) ?? 0;
-    if (r.type === "diaper") b.diapers++;
-    if (r.type === "play") b.playMins += (r.meta?.mins as number) ?? 0;
-  });
+  const buckets = aggregateLocalDays(records, days);
 
   type Key = "feeds" | "sleepMins" | "diapers" | "playMins";
   const max = (key: Key) => Math.max(...buckets.map((b) => b[key]), 1);

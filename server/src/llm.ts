@@ -1,20 +1,22 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import Anthropic from "@anthropic-ai/sdk";
+import type Anthropic from "@anthropic-ai/sdk";
 import type { ParseResult, RoutineRecord } from "./types.js";
 import { ruleBasedParse } from "./parser.js";
-import { findRecords, getRecord, insertRecord } from "./db.js";
-import { callMcpTool, getAnthropicToolSchemas } from "./mcp/client.js";
-
-const apiKey = process.env.ANTHROPIC_API_KEY;
-const client = apiKey ? new Anthropic({ apiKey }) : null;
-const MODEL = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5";
-const MAX_ITERATIONS = 5;
-// Sonnet 5 runs adaptive thinking by default (Sonnet 4.6 ran thinking-off when
-// omitted). Thinking shares this budget with tool calls + text, so 1024 risks
-// truncating a turn mid-tool-call — give it headroom.
-const MAX_TOKENS = 4096;
+import { findRecords, getRecord } from "./db.js";
+import {
+  callRecordTool,
+  handleLogRecord,
+  RECORD_TOOLS,
+} from "./records/tools.js";
+import {
+  anthropicClient as client,
+  getLlmStatus,
+  LLM_CONFIG,
+  markLlmDegraded,
+  markLlmHealthy,
+} from "./llm/config.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SYSTEM = readFileSync(
@@ -82,7 +84,31 @@ async function fallbackPath(
   const out = ruleBasedParse(text, now);
   if (!out.draft)
     return { replyText: out.replyText, created: [], updated: [], deleted: [] };
-  const rec = insertRecord({ ...out.draft, userId: loggerId });
+  const handled = handleLogRecord(out.draft, { loggerId, now });
+  if (handled.isError) {
+    return {
+      replyText: "I couldn't safely create that record. Please add a little more detail.",
+      created: [],
+      updated: [],
+      deleted: [],
+    };
+  }
+  const id =
+    handled.result &&
+    typeof handled.result === "object" &&
+    "id" in handled.result &&
+    typeof handled.result.id === "number"
+      ? handled.result.id
+      : null;
+  const rec = id == null ? null : getRecord(id);
+  if (!rec) {
+    return {
+      replyText: "I couldn't safely create that record. Please try again.",
+      created: [],
+      updated: [],
+      deleted: [],
+    };
+  }
   return {
     replyText: out.replyText,
     created: [rec],
@@ -137,23 +163,11 @@ export async function llmParse(
 
   const ctx: ToolRunContext = { now, created: [], updated: [], deleted: [] };
 
-  let toolSchemas: Anthropic.Messages.Tool[];
-  try {
-    const raw = await getAnthropicToolSchemas();
-
-    console.log("raw", raw);
-    toolSchemas = raw.map((t) => ({
-      name: t.name,
-      description: t.description,
-      input_schema: t.input_schema,
-    })) as Anthropic.Messages.Tool[];
-  } catch (err) {
-    console.warn(
-      "[llm] could not load MCP tool schemas, falling back to rule-based:",
-      (err as Error).message,
-    );
-    return fallbackPath(text, now, loggerId);
-  }
+  const toolSchemas = RECORD_TOOLS.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    input_schema: tool.inputSchema,
+  })) as Anthropic.Messages.Tool[];
 
   const localNowLine =
     typeof tzOffsetMin === "number"
@@ -162,16 +176,14 @@ export async function llmParse(
 
   const firstUserContent = `now: ${now.toISOString()}\n${localNowLine}${summariseTodaysRecords(now)}\nparent said: ${text}`;
 
-  console.log({ firstUserContent });
-
   const messages = buildInitialMessages(history, firstUserContent);
 
   let finalText = "";
   try {
-    for (let i = 0; i < MAX_ITERATIONS; i++) {
+    for (let i = 0; i < LLM_CONFIG.maxToolIterations; i++) {
       const res = await client.messages.create({
-        model: MODEL,
-        max_tokens: MAX_TOKENS,
+        model: LLM_CONFIG.model,
+        max_tokens: LLM_CONFIG.chatMaxTokens,
         system: SYSTEM,
         tools: toolSchemas,
         messages,
@@ -184,14 +196,6 @@ export async function llmParse(
         .trim();
       if (textParts) finalText = textParts;
 
-      console.log(
-        "[llm] iter",
-        i,
-        "stop_reason:",
-        res.stop_reason,
-        "text:",
-        textParts.slice(0, 80),
-      );
       if (res.stop_reason !== "tool_use") break;
 
       const toolUses = res.content.filter(
@@ -210,23 +214,12 @@ export async function llmParse(
       const results: Anthropic.Messages.ToolResultBlockParam[] = [];
       for (const tu of toolUses) {
         const args = (tu.input ?? {}) as Record<string, unknown>;
-        // Injected server-side, not part of the schema Claude sees, so the
-        // model can't spoof attribution. The MCP server reads this field to
-        // stamp records.user_id.
-        if (tu.name === "log_record" && loggerId != null) {
-          args._loggerId = loggerId;
-        }
-        // Injected server-side so the MCP server can convert the model's
-        // local-wall-clock `at` into the correct UTC instant.
-        if (
-          (tu.name === "log_record" || tu.name === "update_record") &&
-          typeof tzOffsetMin === "number"
-        ) {
-          args._tzOffsetMin = tzOffsetMin;
-        }
-        console.log("[llm] tool_use:", tu.name, JSON.stringify(args));
         try {
-          const outcome = await callMcpTool(tu.name, args);
+          const outcome = callRecordTool(tu.name, args, {
+            loggerId,
+            tzOffsetMin,
+            now,
+          });
           trackToolEffect(tu.name, args, outcome, ctx);
           results.push({
             type: "tool_result",
@@ -256,6 +249,7 @@ export async function llmParse(
         : "Got it.";
     }
 
+    markLlmHealthy();
     return {
       replyText: finalText,
       created: ctx.created,
@@ -263,12 +257,10 @@ export async function llmParse(
       deleted: ctx.deleted,
     };
   } catch (err) {
-    console.warn(
-      "[llm] tool-use loop failed, falling back to rule-based:",
-      (err as Error).message,
-    );
+    markLlmDegraded("chat_request_failed");
     return fallbackPath(text, now, loggerId);
   }
 }
 
 export const llmEnabled = !!client;
+export { getLlmStatus };

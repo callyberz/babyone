@@ -1224,3 +1224,26 @@ button:focus-visible {
   color: #94a3b8;
   margin-top: 4px;
 }
+.cluster {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cluster-wrap {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.metric-unit {
+  font-size: 16px;
+  font-weight: inherit;
+}
+
+.metric-unit-lg {
+  font-size: 18px;
+}
+
+.activity-panel {
+  grid-column: 1 / -1;
+}

@@ -54,10 +54,16 @@ export function mountAuthRoutes(
 
     const row = db
       .prepare(
-        "SELECT id, password_hash, display_name FROM users WHERE email = ?",
+        "SELECT id, password_hash, display_name, role FROM users WHERE email = ?",
       )
       .get(email) as
-      { id: number; password_hash: string; display_name: string } | undefined;
+      | {
+          id: number;
+          password_hash: string;
+          display_name: string;
+          role: "administrator" | "caregiver";
+        }
+      | undefined;
 
     const ok = row
       ? await verifyPassword(row.password_hash, password)
@@ -75,7 +81,7 @@ export function mountAuthRoutes(
         id: row.id,
         email,
         displayName: row.display_name,
-        isAdmin: isAdmin(email),
+        isAdmin: isAdmin(row),
       },
     });
   });
@@ -115,7 +121,12 @@ export function mountAuthRoutes(
       const sid = createSession(db, userId, c.req.header("User-Agent") ?? "");
       setCookie(c, COOKIE, sid, cookieOpts(SESSION_TTL_MS));
       return c.json({
-        user: { id: userId, email, displayName, isAdmin: isAdmin(email) },
+        user: {
+          id: userId,
+          email,
+          displayName,
+          isAdmin: false,
+        },
       });
     } catch (err: unknown) {
       const msg = (err as { message?: string }).message ?? "";
@@ -146,7 +157,7 @@ export function mountAuthRoutes(
         id: row.userId,
         email: row.email,
         displayName: row.displayName,
-        isAdmin: isAdmin(row.email),
+        isAdmin: isAdmin(row),
       },
     });
   });
