@@ -1,4 +1,5 @@
 export type {
+  Baby,
   ChatMessage,
   KnownRecordType,
   RecordMeta,
@@ -6,14 +7,7 @@ export type {
   RoutineRecord,
   User,
 } from "@babyone/contracts";
-
 import type { KnownRecordType } from "@babyone/contracts";
-
-export interface Baby {
-  name: string;
-  age: string;
-  weight?: string;
-}
 
 export interface Category {
   icon: string;

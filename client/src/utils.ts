@@ -1,4 +1,4 @@
-import type { RecordMeta } from "./types";
+import type { Baby, RecordMeta } from "./types";
 
 export const toDate = (s: string | Date) =>
   s instanceof Date ? s : new Date(s);
@@ -32,6 +32,29 @@ export const fmtDuration = (mins: number) => {
   const rem = m % 60;
   return rem === 0 ? `${h}h` : `${h}h ${rem}m`;
 };
+
+export const formatBabyAge = (birthdate: string, now = new Date()) => {
+  const [year, month, day] = birthdate.split("-").map(Number);
+  const born = new Date(year, month - 1, day);
+  const current = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const days = Math.max(0, Math.floor((current.getTime() - born.getTime()) / 86400000));
+  if (days === 0) return "newborn";
+  if (days < 30) return `${days} day${days === 1 ? "" : "s"}`;
+  if (days < 63) {
+    const weeks = Math.floor(days / 7);
+    return `${weeks} week${weeks === 1 ? "" : "s"}`;
+  }
+  if (days < 365) {
+    const months = Math.floor(days / 30.44);
+    return `${months} month${months === 1 ? "" : "s"}`;
+  }
+  const years = Math.floor(days / 365.2425);
+  const months = Math.floor((days - years * 365.2425) / 30.44);
+  return `${years} year${years === 1 ? "" : "s"}${months ? ` ${months} month${months === 1 ? "" : "s"}` : ""}`;
+};
+
+export const formatBabyWeight = (baby: Pick<Baby, "weightValue" | "weightUnit">) =>
+  baby.weightValue == null ? null : `${Number(baby.weightValue.toFixed(2))} ${baby.weightUnit}`;
 
 export interface RecordChip {
   icon?: string;

@@ -1,6 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
-import type { ChatMessage, RoutineRecord } from "./types";
+import type {
+  Baby,
+  ChatMessage,
+  RoutineRecord,
+  RoutineRecordDraft,
+} from "@babyone/contracts";
 import { useMe } from "./auth/useAuth";
 
 export const recordsKey = ["records"] as const;
@@ -17,6 +22,8 @@ export function useRecords() {
     queryFn: api.listRecords,
     select: sortRecords,
     enabled: !!me.data,
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: false,
   });
 }
 
@@ -26,12 +33,43 @@ export function useMessages() {
     queryKey: messagesKey,
     queryFn: api.listMessages,
     enabled: !!me.data,
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: false,
+  });
+}
+
+export function useUpdateBaby() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.updateBaby,
+    onSuccess: (baby: Baby) => qc.setQueryData(babyKey, baby),
+  });
+}
+
+export function useCreateRecord() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (record: RoutineRecordDraft) => api.createRecord(record),
+    onSuccess: (created) => {
+      qc.setQueryData<RoutineRecord[]>(recordsKey, (records) =>
+        sortRecords([
+          created,
+          ...(records ?? []).filter((record) => record.id !== created.id),
+        ]),
+      );
+    },
   });
 }
 
 export function useBaby() {
   const me = useMe();
-  return useQuery({ queryKey: babyKey, queryFn: api.baby, enabled: !!me.data });
+  return useQuery({
+    queryKey: babyKey,
+    queryFn: api.baby,
+    enabled: !!me.data,
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
+  });
 }
 
 export function useUpdateRecord() {

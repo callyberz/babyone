@@ -3,6 +3,7 @@ import { Icon } from "./icons";
 import type { View } from "./views";
 import { InvitePanel } from "../auth/InvitePanel";
 import { useLogout } from "../auth/useAuth";
+import { formatBabyAge, formatBabyWeight } from "../utils";
 
 const navItems: {
   id: View;
@@ -23,6 +24,7 @@ export function Sidebar({
   setTheme,
   baby,
   user,
+  onEditBaby,
 }: {
   view: View;
   setView: (v: View) => void;
@@ -30,6 +32,7 @@ export function Sidebar({
   setTheme: (t: "light" | "dark") => void;
   baby: Baby | null;
   user: User;
+  onEditBaby: () => void;
 }) {
   const logout = useLogout();
   return (
@@ -42,19 +45,18 @@ export function Sidebar({
         </div>
       </div>
 
-      <div className="baby-card">
+      <button className="baby-card baby-card-button" onClick={onEditBaby}>
         <div className="baby-avatar">{baby?.name?.[0] ?? "C"}</div>
         <div>
           <div className="baby-name">{baby?.name ?? "Clement"}</div>
           <div className="baby-age">
             {baby
-              ? baby.weight
-                ? `${baby.age} old · ${baby.weight}`
-                : `${baby.age} old`
+              ? `${formatBabyAge(baby.birthdate)} old${formatBabyWeight(baby) ? ` · ${formatBabyWeight(baby)}` : ""}`
               : "—"}
           </div>
         </div>
-      </div>
+        <span className="baby-edit" aria-hidden="true">Edit</span>
+      </button>
 
       <nav className="nav">
         <div className="nav-label">Workspace</div>

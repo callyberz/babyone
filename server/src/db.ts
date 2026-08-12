@@ -4,12 +4,14 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { KNOWN_RECORD_TYPES } from "./types.js";
 import type {
+  Baby,
   ChatMessage,
   MessageKind,
   RoutineRecord,
   RecordMeta,
   RecordType,
 } from "./types.js";
+import { validateBaby } from "./types.js";
 
 export function applyAuthSchema(d: DatabaseT.Database): void {
   d.exec(`
@@ -108,7 +110,45 @@ export function applyCoreSchema(d: DatabaseT.Database): void {
   }
 }
 
+export function defaultBaby(now = new Date()): Baby {
+  const birthdate = new Date(now);
+  birthdate.setUTCDate(birthdate.getUTCDate() - 2);
+  return {
+    name: "Clement",
+    birthdate: birthdate.toISOString().slice(0, 10),
+    weightValue: null,
+    weightUnit: "lb",
+  };
+}
+
+export function getBaby(d: DatabaseT.Database = db): Baby {
+  const row = d.prepare("SELECT v FROM kv WHERE k = 'baby'").get() as
+    | { v: string }
+    | undefined;
+  if (!row) throw new Error("baby profile is not initialized");
+  const parsed: unknown = JSON.parse(row.v);
+  const validation = validateBaby(parsed);
+  if (!validation.ok) {
+    throw new Error(`invalid baby profile: ${validation.issues.join(", ")}`);
+  }
+  return validation.value;
+}
+
+export function setBaby(baby: Baby, d: DatabaseT.Database = db): Baby {
+  d.prepare("INSERT OR REPLACE INTO kv (k, v) VALUES ('baby', ?)").run(
+    JSON.stringify(baby),
+  );
+  return baby;
+}
+
+export function ensureBaby(d: DatabaseT.Database = db, now = new Date()): Baby {
+  const existing = d.prepare("SELECT 1 FROM kv WHERE k = 'baby'").get();
+  if (!existing) setBaby(defaultBaby(now), d);
+  return getBaby(d);
+}
+
 applyCoreSchema(db);
+ensureBaby(db);
 
 interface RecordRow {
   id: number;

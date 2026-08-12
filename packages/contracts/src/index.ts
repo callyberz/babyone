@@ -114,6 +114,13 @@ export interface User {
   isAdmin: boolean;
 }
 
+export interface Baby {
+  name: string;
+  birthdate: string;
+  weightValue: number | null;
+  weightUnit: "lb" | "kg";
+}
+
 export interface ValidationSuccess<T> {
   ok: true;
   value: T;
@@ -125,6 +132,63 @@ export interface ValidationFailure {
 }
 
 export type ValidationResult<T> = ValidationSuccess<T> | ValidationFailure;
+
+export function validateBaby(
+  input: unknown,
+  today = new Date().toISOString().slice(0, 10),
+): ValidationResult<Baby> {
+  if (!isObject(input)) {
+    return { ok: false, issues: ["profile must be an object"] };
+  }
+
+  const issues: string[] = [];
+  const name = typeof input.name === "string" ? input.name.trim() : "";
+  if (!name) issues.push("name must be a non-empty string");
+  if (name.length > 60) issues.push("name must be 60 characters or fewer");
+
+  const birthdate = input.birthdate;
+  if (
+    typeof birthdate !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(birthdate)
+  ) {
+    issues.push("birthdate must use YYYY-MM-DD");
+  } else {
+    const parsed = new Date(`${birthdate}T00:00:00.000Z`);
+    if (
+      Number.isNaN(parsed.getTime()) ||
+      parsed.toISOString().slice(0, 10) !== birthdate
+    ) {
+      issues.push("birthdate must be a valid date");
+    } else if (birthdate > today) {
+      issues.push("birthdate cannot be in the future");
+    }
+  }
+
+  const weightValue = input.weightValue;
+  if (
+    weightValue !== null &&
+    (typeof weightValue !== "number" ||
+      !Number.isFinite(weightValue) ||
+      weightValue <= 0 ||
+      weightValue >= 1000)
+  ) {
+    issues.push("weightValue must be empty or a number greater than 0");
+  }
+  if (input.weightUnit !== "lb" && input.weightUnit !== "kg") {
+    issues.push("weightUnit must be lb or kg");
+  }
+
+  if (issues.length) return { ok: false, issues };
+  return {
+    ok: true,
+    value: {
+      name,
+      birthdate: birthdate as string,
+      weightValue: weightValue as number | null,
+      weightUnit: input.weightUnit as "lb" | "kg",
+    },
+  };
+}
 
 const TYPE_SET = new Set<string>(RECORD_TYPES);
 const SIDE_SET = new Set(["left", "right", "both", "bottle"]);

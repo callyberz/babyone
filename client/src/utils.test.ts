@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { fmtDuration, recordChips } from "./utils";
+import {
+  fmtDuration,
+  formatBabyAge,
+  formatBabyWeight,
+  recordChips,
+} from "./utils";
 
 describe("fmtDuration", () => {
   it("shows minutes under an hour", () => {
@@ -76,5 +81,20 @@ describe("recordChips", () => {
     expect(recordChips({ type: "sleep", meta: {} })).toEqual([]);
     expect(recordChips({ type: "diaper" })).toEqual([]);
     expect(recordChips({ type: "other", meta: { mins: 5 } })).toEqual([]);
+  });
+});
+
+describe("baby profile formatting", () => {
+  it("formats ages across newborn, week, month, and year ranges", () => {
+    expect(formatBabyAge("2026-08-11", new Date(2026, 7, 11))).toBe("newborn");
+    expect(formatBabyAge("2026-08-09", new Date(2026, 7, 11))).toBe("2 days");
+    expect(formatBabyAge("2026-07-01", new Date(2026, 7, 11))).toBe("5 weeks");
+    expect(formatBabyAge("2026-05-01", new Date(2026, 7, 11))).toBe("3 months");
+    expect(formatBabyAge("2025-06-01", new Date(2026, 7, 11))).toBe("1 year 2 months");
+  });
+
+  it("formats optional weights without trailing zeroes", () => {
+    expect(formatBabyWeight({ weightValue: 7.4, weightUnit: "lb" })).toBe("7.4 lb");
+    expect(formatBabyWeight({ weightValue: null, weightUnit: "kg" })).toBeNull();
   });
 });

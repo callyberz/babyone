@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import type { RoutineRecord, User } from "./types";
+import type { Baby, RoutineRecord, User } from "./types";
+import { BabyProfileModal } from "./components/BabyProfileModal";
 import { CalendarScreen } from "./components/CalendarScreen";
 import { ChatScreen } from "./components/ChatScreen";
 import { DashScreen } from "./components/DashScreen";
@@ -14,6 +15,7 @@ import {
   useBulkDeleteRecords,
   useDeleteRecord,
   useRecords,
+  useUpdateBaby,
   useUpdateRecord,
 } from "./queries";
 import { useMe } from "./auth/useAuth";
@@ -57,10 +59,12 @@ function AuthenticatedApp({ user }: { user: User }) {
   const [view, setView] = useState<View>(readView);
   const [theme, setTheme] = useState<"light" | "dark">(readTheme);
   const [editing, setEditing] = useState<RoutineRecord | null>(null);
+  const [editingBaby, setEditingBaby] = useState(false);
 
   const recordsQuery = useRecords();
   const babyQuery = useBaby();
   const updateRecordMut = useUpdateRecord();
+  const updateBabyMut = useUpdateBaby();
   const deleteRecordMut = useDeleteRecord();
   const bulkDeleteRecordsMut = useBulkDeleteRecords();
 
@@ -91,6 +95,7 @@ function AuthenticatedApp({ user }: { user: User }) {
         setTheme={setTheme}
         baby={baby}
         user={user}
+        onEditBaby={() => setEditingBaby(true)}
       />
       <main className="main">
         <header className="topbar">
@@ -122,7 +127,13 @@ function AuthenticatedApp({ user }: { user: User }) {
             />
           )}
           {view === "dash" && (
-            <DashScreen records={records} setView={setView} />
+            <DashScreen
+              records={records}
+              baby={baby}
+              user={user}
+              setView={setView}
+              onEditBaby={() => setEditingBaby(true)}
+            />
           )}
           {view === "trends" && <TrendsScreen records={records} />}
           {view === "calendar" && (
@@ -137,6 +148,15 @@ function AuthenticatedApp({ user }: { user: User }) {
           onClose={() => setEditing(null)}
           onSave={updateRecord}
           onDelete={deleteRecord}
+        />
+      )}
+      {editingBaby && baby && (
+        <BabyProfileModal
+          baby={baby}
+          onClose={() => setEditingBaby(false)}
+          onSave={async (nextBaby: Baby) => {
+            await updateBabyMut.mutateAsync(nextBaby);
+          }}
         />
       )}
     </div>

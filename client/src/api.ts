@@ -1,4 +1,10 @@
-import type { Baby, ChatMessage, RoutineRecord, User } from "./types";
+import type {
+  Baby,
+  ChatMessage,
+  RoutineRecord,
+  RoutineRecordDraft,
+  User,
+} from "@babyone/contracts";
 
 export class UnauthenticatedError extends Error {
   constructor() {
@@ -9,7 +15,12 @@ export class UnauthenticatedError extends Error {
 
 const json = async <T>(r: Response): Promise<T> => {
   if (r.status === 401) throw new UnauthenticatedError();
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+  if (!r.ok) {
+    const body = (await r.json().catch(() => null)) as
+      | { error?: string; issues?: string[] }
+      | null;
+    throw new Error(body?.issues?.join(". ") ?? body?.error ?? `${r.status} ${r.statusText}`);
+  }
   return (await r.json()) as T;
 };
 
@@ -25,7 +36,15 @@ const post = (path: string, body: unknown): Promise<Response> =>
 
 export const api = {
   baby: () => req("/api/baby").then((r) => json<Baby>(r)),
+  updateBaby: (baby: Baby) =>
+    req("/api/baby", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(baby),
+    }).then((r) => json<Baby>(r)),
   listRecords: () => req("/api/records").then((r) => json<RoutineRecord[]>(r)),
+  createRecord: (record: RoutineRecordDraft) =>
+    post("/api/records", record).then((r) => json<RoutineRecord>(r)),
   updateRecord: (rec: RoutineRecord) =>
     req(`/api/records/${rec.id}`, {
       method: "PUT",

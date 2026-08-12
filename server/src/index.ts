@@ -7,6 +7,7 @@ import {
   db,
   deleteRecord,
   findRecords,
+  getBaby,
   getRecord,
   getKv,
   hasBriefInRange,
@@ -16,6 +17,7 @@ import {
   listRecentChatMessages,
   listRecords,
   setKv,
+  setBaby,
   updateRecord,
 } from "./db.js";
 import { seedIfEmpty, bootstrapAuth } from "./seed.js";
@@ -26,7 +28,11 @@ import {
   computeBriefWindow,
   generateBriefText,
 } from "./brief.js";
-import { validateRecordDraft, type RoutineRecord } from "./types.js";
+import {
+  validateBaby,
+  validateRecordDraft,
+  type RoutineRecord,
+} from "./types.js";
 import {
   originGuard,
   makeRequireAuth,
@@ -70,12 +76,16 @@ app.use("/api/*", requireAuth);
 // Gated auth-adjacent routes (must come AFTER requireAuth).
 mountInviteRoutes(app, db);
 
-app.get("/api/baby", (c) =>
-  c.json({
-    name: "Clement",
-    age: "2 days",
-  }),
-);
+app.get("/api/baby", (c) => c.json(getBaby()));
+
+app.put("/api/baby", async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const validation = validateBaby(body);
+  if (!validation.ok) {
+    return c.json({ error: "invalid_baby", issues: validation.issues }, 400);
+  }
+  return c.json(setBaby(validation.value));
+});
 
 app.get("/api/records", (c) => c.json(listRecords()));
 

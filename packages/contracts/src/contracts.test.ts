@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   RECORD_TYPES,
+  validateBaby,
   validateRecordDraft,
   type RecordType,
 } from "./index.js";
@@ -65,6 +66,55 @@ describe("record contracts", () => {
         title: "Feed",
         meta: { volume_oz: -1 },
       }).ok,
+    ).toBe(false);
+  });
+});
+
+describe("baby profile contract", () => {
+  it("accepts an optional weight and trims the name", () => {
+    expect(
+      validateBaby(
+        {
+          name: "  Clement  ",
+          birthdate: "2026-08-09",
+          weightValue: null,
+          weightUnit: "lb",
+        },
+        "2026-08-11",
+      ),
+    ).toEqual({
+      ok: true,
+      value: {
+        name: "Clement",
+        birthdate: "2026-08-09",
+        weightValue: null,
+        weightUnit: "lb",
+      },
+    });
+  });
+
+  it("rejects impossible or future dates and invalid weights", () => {
+    expect(
+      validateBaby(
+        {
+          name: "Clement",
+          birthdate: "2026-02-30",
+          weightValue: -1,
+          weightUnit: "stone",
+        },
+        "2026-08-11",
+      ).ok,
+    ).toBe(false);
+    expect(
+      validateBaby(
+        {
+          name: "Clement",
+          birthdate: "2026-08-12",
+          weightValue: 7.4,
+          weightUnit: "lb",
+        },
+        "2026-08-11",
+      ).ok,
     ).toBe(false);
   });
 });
