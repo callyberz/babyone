@@ -42,6 +42,12 @@ import {
 import { mountAuthRoutes, mountInviteRoutes } from "./auth/routes.js";
 import { cleanupExpiredSessions } from "./auth/sessions.js";
 import { cleanupExpiredInvites } from "./auth/invites.js";
+import {
+  parseRecordId,
+  validateBriefRequest,
+  validateBulkDeleteRequest,
+  validateChatRequest,
+} from "./httpValidation.js";
 
 // Seed demo data first so the admin backfill in bootstrapAuth() attributes
 // freshly-seeded records to the admin on a brand-new database.
@@ -100,7 +106,8 @@ app.post("/api/records", async (c) => {
 });
 
 app.put("/api/records/:id", async (c) => {
-  const id = Number(c.req.param("id"));
+  const id = parseRecordId(c.req.param("id"));
+  if (id === null) return c.json({ error: "bad_request" }, 400);
   const existing = getRecord(id);
   if (!existing) return c.json({ error: "not_found" }, 404);
   const body = await c.req.json().catch(() => null);
@@ -118,7 +125,10 @@ app.put("/api/records/:id", async (c) => {
 });
 
 app.delete("/api/records/:id", (c) => {
-  deleteRecord(Number(c.req.param("id")));
+  const id = parseRecordId(c.req.param("id"));
+  if (id === null) return c.json({ error: "bad_request" }, 400);
+  if (!getRecord(id)) return c.json({ error: "not_found" }, 404);
+  deleteRecord(id);
   return c.json({ ok: true });
 });
 
@@ -126,26 +136,22 @@ app.post("/api/records/bulk-delete", async (c) => {
   const user = c.get("user");
   if (!isAdmin(user)) return c.json({ error: "forbidden" }, 403);
 
-  const body = (await c.req.json().catch(() => ({}))) as { ids?: unknown };
-  const ids = body.ids;
-  if (
-    !Array.isArray(ids) ||
-    ids.length === 0 ||
-    !ids.every((id) => typeof id === "number")
-  ) {
+  const body: unknown = await c.req.json().catch(() => null);
+  const validation = validateBulkDeleteRequest(body);
+  if (!validation.ok) {
     return c.json({ error: "bad_request" }, 400);
   }
 
-  return c.json({ deleted: bulkDeleteRecords(ids) });
+  return c.json({ deleted: bulkDeleteRecords(validation.value) });
 });
 
 app.get("/api/messages", (c) => c.json(listMessages()));
 
 app.post("/api/chat", async (c) => {
-  const { text, tzOffsetMin } = (await c.req.json()) as {
-    text: string;
-    tzOffsetMin?: number;
-  };
+  const body: unknown = await c.req.json().catch(() => null);
+  const validation = validateChatRequest(body);
+  if (!validation.ok) return c.json({ error: "bad_request" }, 400);
+  const { text, tzOffsetMin } = validation.value;
   const now = new Date();
   const sessionUser = c.get("user");
 
@@ -169,7 +175,7 @@ app.post("/api/chat", async (c) => {
     text,
     now,
     sessionUser.id,
-    typeof tzOffsetMin === "number" ? tzOffsetMin : null,
+    tzOffsetMin,
     history,
   );
   const recordIds = [
@@ -194,16 +200,10 @@ app.post("/api/chat", async (c) => {
 });
 
 app.post("/api/brief/today", async (c) => {
-  const { localDate, tzOffsetMin } = (await c.req.json()) as {
-    localDate: string;
-    tzOffsetMin: number;
-  };
-  if (
-    !/^\d{4}-\d{2}-\d{2}$/.test(localDate) ||
-    typeof tzOffsetMin !== "number"
-  ) {
-    return c.json({ error: "bad_request" }, 400);
-  }
+  const body: unknown = await c.req.json().catch(() => null);
+  const validation = validateBriefRequest(body);
+  if (!validation.ok) return c.json({ error: "bad_request" }, 400);
+  const { localDate, tzOffsetMin } = validation.value;
 
   if (getKv("brief.lastDate") === localDate) {
     return c.json({ message: null, reason: "already_generated" });

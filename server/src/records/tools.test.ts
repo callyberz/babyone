@@ -128,6 +128,12 @@ describe("in-process record tools", () => {
     );
   });
 
+  it.each([0, -1, 1.5, 101])("rejects an unsafe find limit: %s", (limit) => {
+    const result = handleFindRecords({ limit });
+    expect(result.isError).toBe(true);
+    expect(findRecords).not.toHaveBeenCalled();
+  });
+
   it("returns adapter-ready text from the direct dispatcher", () => {
     const outcome = callRecordTool("find_records", {});
     expect(outcome.isError).toBe(false);

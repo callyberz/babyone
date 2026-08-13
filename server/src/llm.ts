@@ -60,18 +60,47 @@ function startOfToday(now: Date): Date {
   return d;
 }
 
-function summariseTodaysRecords(now: Date): string {
-  const since = startOfToday(now).toISOString();
+function localDayStart(now: Date, tzOffsetMin: number | null): Date {
+  if (typeof tzOffsetMin !== "number" || !Number.isFinite(tzOffsetMin)) {
+    return startOfToday(now);
+  }
+  const offsetMs = tzOffsetMin * 60_000;
+  const localNow = new Date(now.getTime() - offsetMs);
+  return new Date(
+    Date.UTC(
+      localNow.getUTCFullYear(),
+      localNow.getUTCMonth(),
+      localNow.getUTCDate(),
+    ) + offsetMs,
+  );
+}
+
+function formatLocalClock(at: string, tzOffsetMin: number | null): string {
+  const instant = new Date(at);
+  if (typeof tzOffsetMin !== "number" || !Number.isFinite(tzOffsetMin)) {
+    const hh = String(instant.getHours()).padStart(2, "0");
+    const mm = String(instant.getMinutes()).padStart(2, "0");
+    return `${hh}:${mm}`;
+  }
+  const local = new Date(instant.getTime() - tzOffsetMin * 60_000);
+  const hh = String(local.getUTCHours()).padStart(2, "0");
+  const mm = String(local.getUTCMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+export function summariseTodaysRecords(
+  now: Date,
+  tzOffsetMin: number | null = null,
+): string {
+  const since = localDayStart(now, tzOffsetMin).toISOString();
   const todays = findRecords({ since, limit: 50 });
   if (todays.length === 0) return "today's logs: (none yet)";
   const lines = todays
     .slice()
     .reverse()
     .map((r) => {
-      const t = new Date(r.at);
-      const hh = String(t.getHours()).padStart(2, "0");
-      const mm = String(t.getMinutes()).padStart(2, "0");
-      return `  #${r.id} ${r.type} ${hh}:${mm} — ${r.title}`;
+      const clock = formatLocalClock(r.at, tzOffsetMin);
+      return `  #${r.id} ${r.type} ${clock} — ${r.title}`;
     });
   return ["today's logs (ids you can update/delete):", ...lines].join("\n");
 }
@@ -80,8 +109,9 @@ async function fallbackPath(
   text: string,
   now: Date,
   loggerId: number | null,
+  tzOffsetMin: number | null,
 ): Promise<ParseResult> {
-  const out = ruleBasedParse(text, now);
+  const out = ruleBasedParse(text, now, tzOffsetMin);
   if (!out.draft)
     return { replyText: out.replyText, created: [], updated: [], deleted: [] };
   const handled = handleLogRecord(out.draft, { loggerId, now });
@@ -159,7 +189,7 @@ export async function llmParse(
   tzOffsetMin: number | null = null,
   history: ConversationTurn[] = [],
 ): Promise<ParseResult> {
-  if (!client) return fallbackPath(text, now, loggerId);
+  if (!client) return fallbackPath(text, now, loggerId, tzOffsetMin);
 
   const ctx: ToolRunContext = { now, created: [], updated: [], deleted: [] };
 
@@ -170,11 +200,11 @@ export async function llmParse(
   })) as Anthropic.Messages.Tool[];
 
   const localNowLine =
-    typeof tzOffsetMin === "number"
+    typeof tzOffsetMin === "number" && Number.isFinite(tzOffsetMin)
       ? `local now: ${new Date(now.getTime() - tzOffsetMin * 60_000).toISOString().slice(0, 19)}\n`
       : "";
 
-  const firstUserContent = `now: ${now.toISOString()}\n${localNowLine}${summariseTodaysRecords(now)}\nparent said: ${text}`;
+  const firstUserContent = `now: ${now.toISOString()}\n${localNowLine}${summariseTodaysRecords(now, tzOffsetMin)}\nparent said: ${text}`;
 
   const messages = buildInitialMessages(history, firstUserContent);
 
@@ -258,7 +288,22 @@ export async function llmParse(
     };
   } catch (err) {
     markLlmDegraded("chat_request_failed");
-    return fallbackPath(text, now, loggerId);
+    // Tool calls write synchronously as each model iteration completes. If a
+    // later model request fails, reparsing the original message can repeat or
+    // contradict changes that are already durable.
+    if (ctx.created.length || ctx.updated.length || ctx.deleted.length) {
+      const effects: string[] = [];
+      if (ctx.created.length) effects.push(`logged ${ctx.created.length}`);
+      if (ctx.updated.length) effects.push(`updated ${ctx.updated.length}`);
+      if (ctx.deleted.length) effects.push(`deleted ${ctx.deleted.length}`);
+      return {
+        replyText: `I saved the changes (${effects.join(", ")}), but couldn't finish the reply.`,
+        created: ctx.created,
+        updated: ctx.updated,
+        deleted: ctx.deleted,
+      };
+    }
+    return fallbackPath(text, now, loggerId, tzOffsetMin);
   }
 }
 

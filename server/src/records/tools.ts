@@ -257,11 +257,18 @@ export function handleFindRecords(input: FindRecordsInput): RecordToolResult {
   if (input.type && !type) {
     return { result: "Unknown record type filter.", isError: true };
   }
+  const limit = input.limit ?? 20;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+    return {
+      result: "Limit must be a whole number between 1 and 100.",
+      isError: true,
+    };
+  }
   const rows = findRecords({
     since: input.since,
     until: input.until,
     type: type || undefined,
-    limit: input.limit,
+    limit,
   });
   return {
     result: rows.map((record) => ({

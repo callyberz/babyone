@@ -237,12 +237,19 @@ export function validateRecordDraft(
   if (typeof type !== "string" || !TYPE_SET.has(type)) {
     issues.push(`type must be one of: ${RECORD_TYPES.join(", ")}`);
   }
+  let canonicalAt = "";
   if (
     typeof input.at !== "string" ||
     input.at.length === 0 ||
+    !/(?:Z|[+-]\d{2}:\d{2})$/.test(input.at) ||
     Number.isNaN(Date.parse(input.at))
   ) {
-    issues.push("at must be a valid ISO-8601 timestamp");
+    issues.push("at must be a valid ISO-8601 timestamp with a timezone offset");
+  } else {
+    // SQLite compares our timestamps as TEXT, so every accepted representation
+    // must be normalized before it reaches persistence. Mixed offsets otherwise
+    // sort lexicographically rather than chronologically.
+    canonicalAt = new Date(input.at).toISOString();
   }
   if (typeof input.title !== "string" || input.title.trim().length === 0) {
     issues.push("title must be a non-empty string");
@@ -300,7 +307,7 @@ export function validateRecordDraft(
     ok: true,
     value: {
       type: type as RecordType,
-      at: input.at as string,
+      at: canonicalAt,
       title: (input.title as string).trim(),
       detail: (input.detail as string | undefined) ?? "",
       meta: input.meta as RecordMeta,

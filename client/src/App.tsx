@@ -6,7 +6,7 @@ import { ChatScreen } from "./components/ChatScreen";
 import { DashScreen } from "./components/DashScreen";
 import { Icon } from "./components/icons";
 import { RecordModal } from "./components/RecordModal";
-import { Sidebar, TabBar } from "./components/Sidebar";
+import { MobileAccountMenu, Sidebar, TabBar } from "./components/Sidebar";
 import { TodayScreen } from "./components/TodayScreen";
 import { TrendsScreen } from "./components/TrendsScreen";
 import type { View } from "./components/views";
@@ -81,10 +81,15 @@ function AuthenticatedApp({ user }: { user: User }) {
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
 
-  const updateRecord = (r: RoutineRecord) => updateRecordMut.mutate(r);
-  const deleteRecord = (id: number) =>
-    deleteRecordMut.mutate(id, { onSuccess: () => setEditing(null) });
-  const bulkDeleteRecords = (ids: number[]) => bulkDeleteRecordsMut.mutate(ids);
+  const updateRecord = async (record: RoutineRecord): Promise<void> => {
+    await updateRecordMut.mutateAsync(record);
+  };
+  const deleteRecord = async (id: number): Promise<void> => {
+    await deleteRecordMut.mutateAsync(id);
+  };
+  const bulkDeleteRecords = async (ids: number[]): Promise<void> => {
+    await bulkDeleteRecordsMut.mutateAsync(ids);
+  };
 
   return (
     <div className="app">
@@ -114,6 +119,13 @@ function AuthenticatedApp({ user }: { user: User }) {
                 <Icon.plus /> Log via chat
               </button>
             )}
+            <MobileAccountMenu
+              theme={theme}
+              setTheme={setTheme}
+              baby={baby}
+              user={user}
+              onEditBaby={() => setEditingBaby(true)}
+            />
           </div>
         </header>
         <div className="screen">

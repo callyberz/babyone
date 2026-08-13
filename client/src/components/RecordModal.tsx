@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { RoutineRecord } from "../types";
 import { getCategory } from "../types";
 import { Icon } from "./icons";
@@ -11,11 +11,24 @@ export function RecordModal({
 }: {
   record: RoutineRecord;
   onClose: () => void;
-  onSave: (r: RoutineRecord) => void;
-  onDelete: (id: number) => void;
+  onSave: (r: RoutineRecord) => Promise<void>;
+  onDelete: (id: number) => Promise<void>;
 }) {
   const [draft, setDraft] = useState<RoutineRecord>({ ...record });
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const cat = getCategory(draft.type);
+  const busy = saving || deleting;
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !busy) onClose();
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [busy, onClose]);
 
   const setField = <K extends keyof RoutineRecord>(k: K, v: RoutineRecord[K]) =>
     setDraft((d) => ({ ...d, [k]: v }));
@@ -33,9 +46,50 @@ export function RecordModal({
     setField("at", d.toISOString());
   };
 
+  const save = async () => {
+    if (busy) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave(draft);
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save this record");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async () => {
+    if (busy) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      await onDelete(draft.id);
+      onClose();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Could not delete this record",
+      );
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="modal-backdrop"
+      onClick={() => {
+        if (!busy) onClose();
+      }}
+    >
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="record-modal-title"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="modal-h">
           <div className="cluster">
             <div
@@ -51,24 +105,31 @@ export function RecordModal({
             >
               {cat.icon}
             </div>
-            <h2>{cat.label}</h2>
+            <h2 id="record-modal-title">Edit {cat.label.toLowerCase()}</h2>
           </div>
-          <button className="modal-close" onClick={onClose}>
+          <button
+            className="modal-close"
+            onClick={onClose}
+            aria-label="Close"
+            disabled={busy}
+          >
             <Icon.close />
           </button>
         </div>
 
         <div className="modal-field">
-          <label>Title</label>
+          <label htmlFor="record-title">Title</label>
           <input
+            id="record-title"
             value={draft.title}
             onChange={(e) => setField("title", e.target.value)}
           />
         </div>
 
         <div className="modal-field">
-          <label>Time</label>
+          <label htmlFor="record-time">Time</label>
           <input
+            id="record-time"
             type="time"
             value={timeStr}
             onChange={(e) => onTimeChange(e.target.value)}
@@ -81,8 +142,9 @@ export function RecordModal({
         {draft.type === "feed" && (
           <>
             <div className="modal-field">
-              <label>Volume (oz)</label>
+              <label htmlFor="record-volume">Volume (oz)</label>
               <input
+                id="record-volume"
                 type="number"
                 step="0.5"
                 value={(draft.meta?.volume_oz as number) ?? ""}
@@ -92,8 +154,9 @@ export function RecordModal({
               />
             </div>
             <div className="modal-field">
-              <label>Side</label>
+              <label htmlFor="record-side">Side</label>
               <select
+                id="record-side"
                 value={(draft.meta?.side as string) ?? "bottle"}
                 onChange={(e) => setMeta("side", e.target.value)}
               >
@@ -107,8 +170,9 @@ export function RecordModal({
         )}
         {draft.type === "sleep" && (
           <div className="modal-field">
-            <label>Duration (min)</label>
+            <label htmlFor="record-duration">Duration (min)</label>
             <input
+              id="record-duration"
               type="number"
               value={(draft.meta?.mins as number) ?? 0}
               onChange={(e) => setMeta("mins", parseInt(e.target.value) || 0)}
@@ -117,8 +181,9 @@ export function RecordModal({
         )}
         {draft.type === "diaper" && (
           <div className="modal-field">
-            <label>Kind</label>
+            <label htmlFor="record-kind">Kind</label>
             <select
+              id="record-kind"
               value={(draft.meta?.kind as string) ?? "wet"}
               onChange={(e) => setMeta("kind", e.target.value)}
             >
@@ -130,35 +195,67 @@ export function RecordModal({
         )}
 
         <div className="modal-field">
-          <label>Notes</label>
+          <label htmlFor="record-notes">Notes</label>
           <textarea
+            id="record-notes"
             rows={3}
             value={draft.detail ?? ""}
             onChange={(e) => setField("detail", e.target.value)}
           />
         </div>
 
+        {error && (
+          <div className="modal-error" role="alert">
+            {error}
+          </div>
+        )}
+
         <div className="modal-foot">
-          <button
-            className="btn btn-ghost"
-            style={{ color: "var(--warn)" }}
-            onClick={() => onDelete(draft.id)}
-          >
-            Delete
-          </button>
-          <div style={{ flex: 1 }} />
-          <button className="btn" onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            className="btn btn-primary"
-            onClick={() => {
-              onSave(draft);
-              onClose();
-            }}
-          >
-            Save
-          </button>
+          {confirmingDelete ? (
+            <div className="delete-confirm">
+              <span>Delete this record?</span>
+              <button
+                className="btn"
+                onClick={() => setConfirmingDelete(false)}
+                disabled={busy}
+              >
+                Keep it
+              </button>
+              <button
+                className="btn btn-ghost"
+                style={{ color: "var(--warn)" }}
+                onClick={() => void remove()}
+                disabled={busy}
+              >
+                {deleting ? "Deleting…" : "Yes, delete"}
+              </button>
+            </div>
+          ) : (
+            <>
+              <button
+                className="btn btn-ghost"
+                style={{ color: "var(--warn)" }}
+                onClick={() => {
+                  setError(null);
+                  setConfirmingDelete(true);
+                }}
+                disabled={busy}
+              >
+                Delete
+              </button>
+              <div style={{ flex: 1 }} />
+              <button className="btn" onClick={onClose} disabled={busy}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => void save()}
+                disabled={busy || draft.title.trim() === ""}
+              >
+                {saving ? "Saving…" : "Save"}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

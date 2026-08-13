@@ -68,6 +68,31 @@ describe("record contracts", () => {
       }).ok,
     ).toBe(false);
   });
+
+  it("canonicalizes offset timestamps to UTC ISO before persistence", () => {
+    const result = validateRecordDraft({
+      type: "feed",
+      at: "2026-08-10T09:15:00-04:00",
+      title: "Bottle",
+      meta: { volume_oz: 3 },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: { at: "2026-08-10T13:15:00.000Z" },
+    });
+  });
+
+  it("rejects timestamps without an explicit timezone", () => {
+    expect(
+      validateRecordDraft({
+        type: "feed",
+        at: "2026-08-10T09:15:00",
+        title: "Bottle",
+        meta: { volume_oz: 3 },
+      }),
+    ).toMatchObject({ ok: false });
+  });
 });
 
 describe("baby profile contract", () => {

@@ -10,6 +10,7 @@ export interface RuleBasedResult {
 export function ruleBasedParse(
   text: string,
   now = new Date(),
+  tzOffsetMin: number | null = null,
 ): RuleBasedResult {
   const t = text.toLowerCase().trim();
 
@@ -20,9 +21,23 @@ export function ruleBasedParse(
     if (h) return Math.round(parseFloat(h[1]) * 60);
     return null;
   };
-  const extractOz = (): number | null => {
-    const m = t.match(/(\d+(?:\.\d+)?)\s*(?:oz|ounce|ounces|ml)/);
-    return m ? parseFloat(m[1]) : null;
+  const extractBottleVolume = (): {
+    display: string;
+    volumeOz: number;
+  } | null => {
+    const match = t.match(/(\d+(?:\.\d+)?)\s*(oz|ounce|ounces|ml)\b/);
+    if (!match) return null;
+    const amount = parseFloat(match[1]);
+    const unit = match[2];
+    if (unit === "ml") {
+      // Record aggregation currently uses ounces, but preserve the unit the
+      // caregiver entered in the human-readable title.
+      return {
+        display: `${amount} ml`,
+        volumeOz: Number((amount / 29.5735295625).toFixed(3)),
+      };
+    }
+    return { display: `${amount} oz`, volumeOz: amount };
   };
   const extractSide = (): "both" | "left" | "right" | null => {
     if (/\bboth\b/.test(t)) return "both";
@@ -37,6 +52,23 @@ export function ruleBasedParse(
       const min = m[2] ? parseInt(m[2]) : 0;
       if (m[3] === "pm" && hr < 12) hr += 12;
       if (m[3] === "am" && hr === 12) hr = 0;
+
+      if (typeof tzOffsetMin === "number" && Number.isFinite(tzOffsetMin)) {
+        const offsetMs = tzOffsetMin * 60_000;
+        const localNow = new Date(now.getTime() - offsetMs);
+        let localTargetMs = Date.UTC(
+          localNow.getUTCFullYear(),
+          localNow.getUTCMonth(),
+          localNow.getUTCDate(),
+          hr,
+          min,
+        );
+        if (localTargetMs > localNow.getTime()) {
+          localTargetMs -= 24 * 60 * 60 * 1000;
+        }
+        return new Date(localTargetMs + offsetMs).toISOString();
+      }
+
       const d = new Date(now);
       d.setHours(hr, min, 0, 0);
       if (d > now) d.setDate(d.getDate() - 1);
@@ -92,17 +124,20 @@ export function ruleBasedParse(
     /bottle|formula|oz|ounce|ml/.test(t) &&
     !/breast|nursed|nursing/.test(t)
   ) {
-    const vol = extractOz() ?? 3;
+    const volume = extractBottleVolume() ?? {
+      display: "3 oz",
+      volumeOz: 3,
+    };
     const draft: NewRec = {
       type: "feed",
       at: extractTime(),
-      title: `Bottle — ${vol} oz`,
+      title: `Bottle — ${volume.display}`,
       detail: /formula/.test(t) ? "Formula" : "",
-      meta: { volume_oz: vol, side: "bottle" },
+      meta: { volume_oz: volume.volumeOz, side: "bottle" },
     };
     return {
       draft,
-      replyText: `Logged a ${vol} oz bottle.`,
+      replyText: `Logged a ${volume.display} bottle.`,
     };
   }
 

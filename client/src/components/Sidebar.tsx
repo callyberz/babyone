@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import type { Baby, User } from "../types";
 import { Icon } from "./icons";
 import type { View } from "./views";
@@ -34,7 +35,6 @@ export function Sidebar({
   user: User;
   onEditBaby: () => void;
 }) {
-  const logout = useLogout();
   return (
     <aside className="sidebar">
       <div className="logo">
@@ -45,18 +45,7 @@ export function Sidebar({
         </div>
       </div>
 
-      <button className="baby-card baby-card-button" onClick={onEditBaby}>
-        <div className="baby-avatar">{baby?.name?.[0] ?? "C"}</div>
-        <div>
-          <div className="baby-name">{baby?.name ?? "Clement"}</div>
-          <div className="baby-age">
-            {baby
-              ? `${formatBabyAge(baby.birthdate)} old${formatBabyWeight(baby) ? ` · ${formatBabyWeight(baby)}` : ""}`
-              : "—"}
-          </div>
-        </div>
-        <span className="baby-edit" aria-hidden="true">Edit</span>
-      </button>
+      <BabyProfileButton baby={baby} onClick={onEditBaby} />
 
       <nav className="nav">
         <div className="nav-label">Workspace</div>
@@ -75,26 +64,200 @@ export function Sidebar({
       </nav>
 
       <div className="sidebar-footer">
-        <div className="me-card">
-          Signed in as <strong>{user.displayName}</strong>
-        </div>
-        <InvitePanel />
-        <button
-          className="theme-toggle"
-          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-        >
-          <span>{theme === "dark" ? "Dark mode" : "Light mode"}</span>
-          <div className={`toggle-switch ${theme === "dark" ? "on" : ""}`} />
-        </button>
-        <button
-          className="btn btn-small"
-          onClick={() => logout.mutate()}
-          disabled={logout.isPending}
-        >
-          Sign out
-        </button>
+        <CaregiverControls theme={theme} setTheme={setTheme} user={user} />
       </div>
     </aside>
+  );
+}
+
+function BabyProfileButton({
+  baby,
+  onClick,
+}: {
+  baby: Baby | null;
+  onClick: () => void;
+}) {
+  const weight = baby ? formatBabyWeight(baby) : null;
+  return (
+    <button className="baby-card baby-card-button" onClick={onClick}>
+      <div className="baby-avatar">{baby?.name?.[0] ?? "C"}</div>
+      <div>
+        <div className="baby-name">{baby?.name ?? "Clement"}</div>
+        <div className="baby-age">
+          {baby
+            ? `${formatBabyAge(baby.birthdate)} old${weight ? ` · ${weight}` : ""}`
+            : "—"}
+        </div>
+      </div>
+      <span className="baby-edit" aria-hidden="true">Edit</span>
+    </button>
+  );
+}
+
+function CaregiverControls({
+  theme,
+  setTheme,
+  user,
+}: {
+  theme: "light" | "dark";
+  setTheme: (theme: "light" | "dark") => void;
+  user: User;
+}) {
+  const logout = useLogout();
+  const dark = theme === "dark";
+  return (
+    <>
+      <div className="me-card">
+        Signed in as <strong>{user.displayName}</strong>
+      </div>
+      <InvitePanel />
+      <button
+        className="theme-toggle"
+        type="button"
+        role="switch"
+        aria-checked={dark}
+        onClick={() => setTheme(dark ? "light" : "dark")}
+      >
+        <span>{dark ? "Dark mode" : "Light mode"}</span>
+        <span
+          className={`toggle-switch ${dark ? "on" : ""}`}
+          aria-hidden="true"
+        />
+      </button>
+      <button
+        className="btn btn-small"
+        type="button"
+        onClick={() => logout.mutate()}
+        disabled={logout.isPending}
+      >
+        {logout.isPending ? "Signing out…" : "Sign out"}
+      </button>
+      {logout.error && (
+        <div className="auth-error" role="alert">
+          {(logout.error as Error).message}
+        </div>
+      )}
+    </>
+  );
+}
+
+const FOCUSABLE =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+export function MobileAccountMenu({
+  theme,
+  setTheme,
+  baby,
+  user,
+  onEditBaby,
+}: {
+  theme: "light" | "dark";
+  setTheme: (theme: "light" | "dark") => void;
+  baby: Baby | null;
+  user: User;
+  onEditBaby: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const sheetRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const frame = window.requestAnimationFrame(() => {
+      sheetRef.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+    });
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setOpen(false);
+        return;
+      }
+      if (event.key !== "Tab" || !sheetRef.current) return;
+      const focusable = [
+        ...sheetRef.current.querySelectorAll<HTMLElement>(FOCUSABLE),
+      ];
+      if (!focusable.length) return;
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      triggerRef.current?.focus();
+    };
+  }, [open]);
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        className="mobile-account-trigger"
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-label={`Caregiver settings for ${user.displayName}`}
+        onClick={() => setOpen(true)}
+      >
+        {user.displayName.trim().charAt(0).toUpperCase() || "?"}
+      </button>
+      {open && (
+        <div
+          className="mobile-account-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setOpen(false);
+          }}
+        >
+          <section
+            ref={sheetRef}
+            className="mobile-account-sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mobile-account-title"
+          >
+            <div className="mobile-account-heading">
+              <div>
+                <div className="eyebrow">Caregiver account</div>
+                <h2 id="mobile-account-title">Settings</h2>
+              </div>
+              <button
+                className="modal-close"
+                type="button"
+                aria-label="Close caregiver settings"
+                onClick={() => setOpen(false)}
+              >
+                <Icon.close />
+              </button>
+            </div>
+            <BabyProfileButton
+              baby={baby}
+              onClick={() => {
+                setOpen(false);
+                onEditBaby();
+              }}
+            />
+            <div className="mobile-account-controls">
+              <CaregiverControls
+                theme={theme}
+                setTheme={setTheme}
+                user={user}
+              />
+            </div>
+          </section>
+        </div>
+      )}
+    </>
   );
 }
 

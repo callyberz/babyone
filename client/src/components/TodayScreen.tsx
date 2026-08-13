@@ -14,17 +14,36 @@ export function TodayScreen({
   records: RoutineRecord[];
   openRecord: (r: RoutineRecord) => void;
   isAdmin?: boolean;
-  onBulkDelete?: (ids: number[]) => void;
+  onBulkDelete?: (ids: number[]) => Promise<void>;
 }) {
   const [filter, setFilter] = useState<Filter>("all");
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const stopSelecting = () => {
     setSelecting(false);
     setConfirming(false);
+    setDeleteError(null);
     setSelected(new Set());
+  };
+
+  const deleteSelected = async () => {
+    if (!onBulkDelete || deleting || selected.size === 0) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await onBulkDelete([...selected]);
+      stopSelecting();
+    } catch (err) {
+      setDeleteError(
+        err instanceof Error ? err.message : "Could not delete these records",
+      );
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const toggleSelected = (id: number) =>
@@ -164,23 +183,35 @@ export function TodayScreen({
           >
             {confirming ? (
               <>
-                <span>
-                  Delete {selected.size} record
-                  {selected.size === 1 ? "" : "s"}? This can't be undone.
-                </span>
+                <div>
+                  <span>
+                    Delete {selected.size} record
+                    {selected.size === 1 ? "" : "s"}? This can't be undone.
+                  </span>
+                  {deleteError && (
+                    <div className="modal-error" role="alert">
+                      {deleteError}
+                    </div>
+                  )}
+                </div>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button className="btn" onClick={() => setConfirming(false)}>
+                  <button
+                    className="btn"
+                    onClick={() => {
+                      setConfirming(false);
+                      setDeleteError(null);
+                    }}
+                    disabled={deleting}
+                  >
                     Cancel
                   </button>
                   <button
                     className="btn btn-ghost"
                     style={{ color: "var(--warn)" }}
-                    onClick={() => {
-                      onBulkDelete?.([...selected]);
-                      stopSelecting();
-                    }}
+                    onClick={() => void deleteSelected()}
+                    disabled={deleting}
                   >
-                    Confirm delete
+                    {deleting ? "Deleting…" : "Confirm delete"}
                   </button>
                 </div>
               </>
