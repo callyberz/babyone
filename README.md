@@ -53,6 +53,10 @@ bootstrap variables remaining in the environment.
 Additional caregivers join via one-time invite links generated in the sidebar
 ("Invite caregiver"). Invites expire after 24h.
 
+Caregiver timelines update incrementally in the background, so long household
+histories are not downloaded again on every refresh. Administrators can also
+download a versioned, secret-free JSON household archive from the sidebar.
+
 Production initialization creates schema and the bootstrap account only; it
 does not create routine records or chat history. Demo data is opt-in for local
 development with `BABYONE_SEED_DEMO=1`.
@@ -68,15 +72,20 @@ a fresh invite for that caregiver to sign up again with the same email.
 ## Deployment
 
 Containerized via `Dockerfile` and deployed to Fly.io (`fly.toml`). See [`DEPLOY.md`](./DEPLOY.md) for details.
+The deployment runbook includes the supported WAL-safe online backup and
+disposable restore-verification workflow. Do not directly copy a live
+`data.db` file while SQLite is in WAL mode.
 
 ## Project layout
 
 ```
 packages/contracts/      Shared record contracts, validation, aggregation
 server/                  Hono + SQLite + LLM integration
-  src/index.ts           Routes (health, auth, baby, records, messages, chat)
+  src/app.ts             Testable application factory and mounted API routes
+  src/index.ts           Production bootstrap and HTTP listener
   src/auth/              Passwords, sessions, invites, middleware, auth routes
-  src/db.ts              SQLite schema + kv helpers
+  src/db.ts              SQLite schema, sync feed, and persistence helpers
+  src/ops/               Backup and restore-verification tooling
   src/seed.ts            Opt-in demo seed + first-admin bootstrap
   src/llm.ts             Claude-backed parser (rule-based fallback)
   src/parser.ts          Rule-based fallback parser

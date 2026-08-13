@@ -4,6 +4,7 @@ import { Icon } from "./icons";
 import type { View } from "./views";
 import { InvitePanel } from "../auth/InvitePanel";
 import { useLogout } from "../auth/useAuth";
+import { api } from "../api";
 import { formatBabyAge, formatBabyWeight } from "../utils";
 
 const navItems: {
@@ -105,12 +106,63 @@ function CaregiverControls({
 }) {
   const logout = useLogout();
   const dark = theme === "dark";
+  const [exporting, setExporting] = useState(false);
+  const [exportStatus, setExportStatus] = useState<
+    { kind: "success" | "error"; message: string } | undefined
+  >();
+
+  const downloadExport = async () => {
+    if (exporting) return;
+    setExporting(true);
+    setExportStatus(undefined);
+    try {
+      await api.downloadExport();
+      setExportStatus({
+        kind: "success",
+        message: "Household data export downloaded.",
+      });
+    } catch (error) {
+      setExportStatus({
+        kind: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Could not export household data",
+      });
+    } finally {
+      setExporting(false);
+    }
+  };
   return (
     <>
       <div className="me-card">
         Signed in as <strong>{user.displayName}</strong>
       </div>
       <InvitePanel />
+      {user.isAdmin && (
+        <div className="export-control">
+          <button
+            className="btn btn-small"
+            type="button"
+            onClick={() => void downloadExport()}
+            disabled={exporting}
+          >
+            {exporting ? "Preparing export…" : "Export household data"}
+          </button>
+          {exportStatus && (
+            <div
+              className={
+                exportStatus.kind === "error"
+                  ? "auth-error export-feedback"
+                  : "export-feedback export-success"
+              }
+              role={exportStatus.kind === "error" ? "alert" : "status"}
+            >
+              {exportStatus.message}
+            </div>
+          )}
+        </div>
+      )}
       <button
         className="theme-toggle"
         type="button"

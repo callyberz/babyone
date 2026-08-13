@@ -105,6 +105,16 @@ export interface ChatMessage {
   kind?: MessageKind;
 }
 
+export interface HouseholdSync {
+  full: boolean;
+  cursor: number;
+  hasMore: boolean;
+  records: RoutineRecord[];
+  messages: ChatMessage[];
+  deletedRecordIds: number[];
+  deletedMessageIds: number[];
+}
+
 export type UserRole = "administrator" | "caregiver";
 
 export interface User {

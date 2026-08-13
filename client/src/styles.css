@@ -425,7 +425,8 @@ button:focus-visible {
 }
 
 .mobile-account-controls > .btn,
-.mobile-account-controls .invite-panel > .btn {
+.mobile-account-controls .invite-panel > .btn,
+.mobile-account-controls .export-control > .btn {
   width: 100%;
   min-height: 44px;
   justify-content: center;
@@ -1384,6 +1385,19 @@ button:focus-visible {
 }
 .invite-hint {
   color: #94a3b8;
+}
+.export-control {
+  display: grid;
+  gap: 4px;
+}
+.export-control > .btn {
+  justify-content: center;
+}
+.export-feedback {
+  font-size: 12px;
+}
+.export-success {
+  color: var(--ok);
 }
 .me-card {
   font-size: 12px;

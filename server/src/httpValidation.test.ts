@@ -3,6 +3,7 @@ import {
   MAX_BULK_DELETE_IDS,
   MAX_CHAT_TEXT_LENGTH,
   parseRecordId,
+  parseSyncCursor,
   validateBriefRequest,
   validateBulkDeleteRequest,
   validateChatRequest,
@@ -56,7 +57,21 @@ describe("validateBriefRequest", () => {
       validateBriefRequest({ localDate: "2026-08-13", tzOffsetMin: -840 }),
     ).toEqual({
       ok: true,
-      value: { localDate: "2026-08-13", tzOffsetMin: -840 },
+      value: { localDate: "2026-08-13", tzOffsetMin: -840, timeZone: null },
+    });
+    expect(
+      validateBriefRequest({
+        localDate: "2026-11-01",
+        tzOffsetMin: 240,
+        timeZone: "America/Toronto",
+      }),
+    ).toEqual({
+      ok: true,
+      value: {
+        localDate: "2026-11-01",
+        tzOffsetMin: 240,
+        timeZone: "America/Toronto",
+      },
     });
   });
 
@@ -70,6 +85,8 @@ describe("validateBriefRequest", () => {
     { localDate: "2026-08-13", tzOffsetMin: "240" },
     { localDate: "2026-08-13", tzOffsetMin: Number.NaN },
     { localDate: "2026-08-13", tzOffsetMin: 900 },
+    { localDate: "2026-08-13", tzOffsetMin: 0, timeZone: "Not/A_Zone" },
+    { localDate: "2026-08-13", tzOffsetMin: 0, timeZone: "GMT+4" },
   ])("rejects an invalid brief body: %j", (body) => {
     expect(validateBriefRequest(body)).toEqual({ ok: false });
   });
@@ -84,6 +101,19 @@ describe("record id validation", () => {
   it.each(["", "0", "-1", "1.5", "1e2", "01", "abc", "9007199254740992"])(
     "rejects invalid id %s",
     (value) => expect(parseRecordId(value)).toBeNull(),
+  );
+});
+
+describe("sync cursor validation", () => {
+  it("distinguishes a missing cursor from a valid non-negative cursor", () => {
+    expect(parseSyncCursor(undefined)).toBeNull();
+    expect(parseSyncCursor("0")).toBe(0);
+    expect(parseSyncCursor("42")).toBe(42);
+  });
+
+  it.each(["", "-1", "1.5", "01", "abc", "9007199254740992"])(
+    "rejects invalid cursor %s",
+    (value) => expect(parseSyncCursor(value)).toBe(false),
   );
 });
 

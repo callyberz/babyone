@@ -6,10 +6,16 @@ import { bodyLimit } from "hono/body-limit";
 import type {
   Baby,
   ChatMessage,
+  HouseholdSync,
   ParseResult,
   RoutineRecord,
 } from "./types.js";
-import type { ChatApiResponse, ChatRequestClaim } from "./db.js";
+import type {
+  BriefRequestClaim,
+  ChatApiResponse,
+  ChatRequestClaim,
+  HouseholdExport,
+} from "./db.js";
 import { validateBaby, validateRecordDraft } from "./types.js";
 import type { ConversationTurn } from "./llm.js";
 import type { LlmStatus } from "./llm/config.js";
@@ -26,6 +32,7 @@ import {
 import { mountAuthRoutes, mountInviteRoutes } from "./auth/routes.js";
 import {
   parseRecordId,
+  parseSyncCursor,
   validateBriefRequest,
   validateBulkDeleteRequest,
   validateChatRequest,
@@ -67,6 +74,9 @@ export interface AppDependencies {
   deleteRecord: (id: number) => void;
   bulkDeleteRecords: (ids: number[]) => number[];
   listMessages: () => ChatMessage[];
+  getSyncSnapshot: () => HouseholdSync;
+  getSyncDelta: (after: number) => HouseholdSync;
+  exportHouseholdData: (at: Date) => HouseholdExport;
   listRecentChatMessages: (limit: number) => ChatMessage[];
   insertMessage: (message: Omit<ChatMessage, "id">) => ChatMessage;
   claimChatRequest: (input: {
@@ -83,9 +93,17 @@ export interface AppDependencies {
     updated: RoutineRecord[];
     deleted: number[];
   }) => ChatApiResponse;
-  hasBriefInRange: (startIso: string, endIso: string) => boolean;
-  getKv: (key: string) => string | null;
-  setKv: (key: string, value: string) => void;
+  claimBriefRequest: (input: {
+    localDate: string;
+    at: string;
+    staleAfterMs?: number;
+  }) => BriefRequestClaim;
+  completeBriefRequest: (input: {
+    localDate: string;
+    at: string;
+    text?: string;
+    reason?: string;
+  }) => { message: ChatMessage | null; reason?: string };
   now?: () => Date;
 }
 
@@ -208,6 +226,26 @@ export function createApp(deps: AppDependencies): Hono<AuthEnv> {
 
   app.get("/api/messages", (c) => c.json(deps.listMessages()));
 
+  app.get("/api/sync", (c) => {
+    const cursor = parseSyncCursor(c.req.query("after"));
+    if (cursor === false) {
+      return c.json({ error: "bad_request" }, 400);
+    }
+    return c.json(
+      cursor === null ? deps.getSyncSnapshot() : deps.getSyncDelta(cursor),
+    );
+  });
+
+  app.get("/api/export", (c) => {
+    if (!isAdmin(c.get("user"))) return c.json({ error: "forbidden" }, 403);
+    const exportedAt = now();
+    c.header(
+      "Content-Disposition",
+      `attachment; filename="babyone-household-${exportedAt.toISOString().slice(0, 10)}.json"`,
+    );
+    return c.json(deps.exportHouseholdData(exportedAt));
+  });
+
   app.post("/api/chat", async (c) => {
     const body: unknown = await c.req.json().catch(() => null);
     const validation = validateChatRequest(body);
@@ -288,18 +326,24 @@ export function createApp(deps: AppDependencies): Hono<AuthEnv> {
     const body: unknown = await c.req.json().catch(() => null);
     const validation = validateBriefRequest(body);
     if (!validation.ok) return c.json({ error: "bad_request" }, 400);
-    const { localDate, tzOffsetMin } = validation.value;
-
-    if (deps.getKv("brief.lastDate") === localDate) {
-      return c.json({ message: null, reason: "already_generated" });
+    const { localDate, tzOffsetMin, timeZone } = validation.value;
+    const claim = deps.claimBriefRequest({
+      localDate,
+      at: now().toISOString(),
+    });
+    if (claim.state === "pending") {
+      c.header("Retry-After", "1");
+      return c.json({ message: null, reason: "in_progress" }, 409);
+    }
+    if (claim.state === "completed") {
+      return c.json({
+        message: claim.message,
+        reason: claim.message ? "already_generated" : claim.reason,
+      });
     }
 
-    const { yesterdayStart, yesterdayEnd, baselineStart, todayEnd } =
-      computeBriefWindow(localDate, tzOffsetMin);
-    if (deps.hasBriefInRange(yesterdayEnd, todayEnd)) {
-      deps.setKv("brief.lastDate", localDate);
-      return c.json({ message: null, reason: "already_generated" });
-    }
+    const { yesterdayStart, yesterdayEnd, baselineStart } =
+      computeBriefWindow(localDate, tzOffsetMin, timeZone);
 
     const all = deps.findRecords({
       since: baselineStart,
@@ -314,8 +358,13 @@ export function createApp(deps: AppDependencies): Hono<AuthEnv> {
     );
 
     if (yesterdayRecords.length <= 2) {
-      deps.setKv("brief.lastDate", localDate);
-      return c.json({ message: null, reason: "insufficient_data" });
+      return c.json(
+        deps.completeBriefRequest({
+          localDate,
+          at: now().toISOString(),
+          reason: "insufficient_data",
+        }),
+      );
     }
 
     const yesterday = aggregateDay(yesterdayRecords);
@@ -325,15 +374,13 @@ export function createApp(deps: AppDependencies): Hono<AuthEnv> {
       new Date(yesterdayStart),
     );
     const text = await deps.generateBriefText(yesterday, avg);
-    const message = deps.insertMessage({
-      from: "bot",
-      at: now().toISOString(),
-      text,
-      recordIds: [],
-      kind: "brief",
-    });
-    deps.setKv("brief.lastDate", localDate);
-    return c.json({ message });
+    return c.json(
+      deps.completeBriefRequest({
+        localDate,
+        at: now().toISOString(),
+        text,
+      }),
+    );
   });
 
   if (deps.staticRoot) {

@@ -6,6 +6,7 @@ import { KNOWN_RECORD_TYPES } from "./types.js";
 import type {
   Baby,
   ChatMessage,
+  HouseholdSync,
   MessageKind,
   RoutineRecord,
   RecordMeta,
@@ -115,6 +116,26 @@ export function applyCoreSchema(d: DatabaseT.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_chat_requests_created
       ON chat_requests(created_at);
+
+    CREATE TABLE IF NOT EXISTS brief_requests (
+      local_date  TEXT PRIMARY KEY,
+      state       TEXT NOT NULL CHECK (state IN ('pending','completed','skipped')),
+      claimed_at  TEXT NOT NULL,
+      completed_at TEXT,
+      message_id  INTEGER REFERENCES messages(id),
+      reason      TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_brief_requests_claimed
+      ON brief_requests(claimed_at);
+  `);
+  // Preserve the legacy one-brief-per-date marker during the migration so a
+  // deploy does not regenerate a brief that was completed before claims existed.
+  d.exec(`
+    INSERT OR IGNORE INTO brief_requests
+      (local_date, state, claimed_at, completed_at, reason)
+    SELECT v, 'skipped', datetime('now'), datetime('now'), 'already_generated'
+    FROM kv
+    WHERE k = 'brief.lastDate' AND v GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]';
   `);
   const messageColumns = d.prepare("PRAGMA table_info(messages)").all() as {
     name: string;
@@ -122,6 +143,48 @@ export function applyCoreSchema(d: DatabaseT.Database): void {
   if (!messageColumns.some((column) => column.name === "kind")) {
     d.exec("ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'");
   }
+  d.exec(`
+    CREATE TABLE IF NOT EXISTS sync_changes (
+      seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+      entity     TEXT NOT NULL CHECK (entity IN ('record','message')),
+      entity_id  INTEGER NOT NULL,
+      operation  TEXT NOT NULL CHECK (operation IN ('upsert','delete')),
+      changed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_sync_changes_entity
+      ON sync_changes(entity, entity_id, seq DESC);
+
+    CREATE TRIGGER IF NOT EXISTS records_sync_insert
+    AFTER INSERT ON records BEGIN
+      INSERT INTO sync_changes (entity, entity_id, operation)
+      VALUES ('record', NEW.id, 'upsert');
+    END;
+    CREATE TRIGGER IF NOT EXISTS records_sync_update
+    AFTER UPDATE ON records BEGIN
+      INSERT INTO sync_changes (entity, entity_id, operation)
+      VALUES ('record', NEW.id, 'upsert');
+    END;
+    CREATE TRIGGER IF NOT EXISTS records_sync_delete
+    AFTER DELETE ON records BEGIN
+      INSERT INTO sync_changes (entity, entity_id, operation)
+      VALUES ('record', OLD.id, 'delete');
+    END;
+    CREATE TRIGGER IF NOT EXISTS messages_sync_insert
+    AFTER INSERT ON messages BEGIN
+      INSERT INTO sync_changes (entity, entity_id, operation)
+      VALUES ('message', NEW.id, 'upsert');
+    END;
+    CREATE TRIGGER IF NOT EXISTS messages_sync_update
+    AFTER UPDATE ON messages BEGIN
+      INSERT INTO sync_changes (entity, entity_id, operation)
+      VALUES ('message', NEW.id, 'upsert');
+    END;
+    CREATE TRIGGER IF NOT EXISTS messages_sync_delete
+    AFTER DELETE ON messages BEGIN
+      INSERT INTO sync_changes (entity, entity_id, operation)
+      VALUES ('message', OLD.id, 'delete');
+    END;
+  `);
 }
 
 export function defaultBaby(now = new Date()): Baby {
@@ -217,8 +280,8 @@ const rowToMessage = (r: MessageRow): ChatMessage => ({
   kind: r.kind,
 });
 
-export const listRecords = (): RoutineRecord[] =>
-  (db.prepare(`${BASE_SELECT} ORDER BY r.at DESC`).all() as RecordRow[]).map(
+export const listRecords = (d: DatabaseT.Database = db): RoutineRecord[] =>
+  (d.prepare(`${BASE_SELECT} ORDER BY r.at DESC`).all() as RecordRow[]).map(
     rowToRecord,
   );
 
@@ -331,10 +394,183 @@ export const bulkDeleteRecords = (ids: number[]): number[] => {
   return tx(ids);
 };
 
-export const listMessages = (): ChatMessage[] =>
+export const listMessages = (d: DatabaseT.Database = db): ChatMessage[] =>
   (
-    db.prepare("SELECT * FROM messages ORDER BY at ASC").all() as MessageRow[]
+    d.prepare("SELECT * FROM messages ORDER BY at ASC, id ASC").all() as MessageRow[]
   ).map(rowToMessage);
+
+interface SyncChangeRow {
+  seq: number;
+  entity: "record" | "message";
+  entity_id: number;
+  operation: "upsert" | "delete";
+}
+
+const currentSyncCursor = (d: DatabaseT.Database): number =>
+  (
+    d.prepare("SELECT COALESCE(MAX(seq), 0) AS cursor FROM sync_changes").get() as {
+      cursor: number;
+    }
+  ).cursor;
+
+const SYNC_RETENTION = 50_000;
+
+function pruneSyncChanges(d: DatabaseT.Database): void {
+  d.prepare(
+    `DELETE FROM sync_changes
+     WHERE seq <= (SELECT COALESCE(MAX(seq), 0) - ? FROM sync_changes)`,
+  ).run(SYNC_RETENTION);
+}
+
+export function getSyncSnapshot(
+  d: DatabaseT.Database = db,
+): HouseholdSync {
+  return d.transaction(() => {
+    pruneSyncChanges(d);
+    return {
+      full: true,
+      cursor: currentSyncCursor(d),
+      hasMore: false,
+      records: listRecords(d),
+      messages: listMessages(d),
+      deletedRecordIds: [],
+      deletedMessageIds: [],
+    };
+  })();
+}
+
+function recordsByIds(ids: number[], d: DatabaseT.Database): RoutineRecord[] {
+  if (ids.length === 0) return [];
+  const placeholders = ids.map(() => "?").join(",");
+  return (
+    d
+      .prepare(`${BASE_SELECT} WHERE r.id IN (${placeholders})`)
+      .all(...ids) as RecordRow[]
+  ).map(rowToRecord);
+}
+
+function messagesByIds(ids: number[], d: DatabaseT.Database): ChatMessage[] {
+  if (ids.length === 0) return [];
+  const placeholders = ids.map(() => "?").join(",");
+  return (
+    d.prepare(`SELECT * FROM messages WHERE id IN (${placeholders})`).all(
+      ...ids,
+    ) as MessageRow[]
+  ).map(rowToMessage);
+}
+
+export function getSyncDelta(
+  after: number,
+  limit = 500,
+  d: DatabaseT.Database = db,
+): HouseholdSync {
+  const pageSize = Math.max(1, Math.min(500, Math.trunc(limit)));
+  pruneSyncChanges(d);
+  const oldest = d.prepare("SELECT MIN(seq) AS seq FROM sync_changes").get() as {
+    seq: number | null;
+  };
+  if (oldest.seq !== null && after < oldest.seq - 1) {
+    return getSyncSnapshot(d);
+  }
+  const changes = d
+    .prepare(
+      `SELECT seq, entity, entity_id, operation FROM sync_changes
+       WHERE seq > ? ORDER BY seq ASC LIMIT ?`,
+    )
+    .all(after, pageSize + 1) as SyncChangeRow[];
+  const page = changes.slice(0, pageSize);
+  const cursor = page.at(-1)?.seq ?? after;
+  const latest = new Map<string, SyncChangeRow>();
+  for (const change of page) {
+    latest.set(`${change.entity}:${change.entity_id}`, change);
+  }
+
+  const recordUpserts = [...latest.values()]
+    .filter(
+      (change) =>
+        change.entity === "record" && change.operation === "upsert",
+    )
+    .map((change) => change.entity_id);
+  const messageUpserts = [...latest.values()]
+    .filter(
+      (change) =>
+        change.entity === "message" && change.operation === "upsert",
+    )
+    .map((change) => change.entity_id);
+  const records = recordsByIds(recordUpserts, d);
+  const messages = messagesByIds(messageUpserts, d);
+  const foundRecordIds = new Set(records.map((record) => record.id));
+  const foundMessageIds = new Set(messages.map((message) => message.id));
+
+  return {
+    full: false,
+    cursor,
+    hasMore: changes.length > pageSize,
+    records,
+    messages,
+    deletedRecordIds: [...latest.values()]
+      .filter(
+        (change) =>
+          change.entity === "record" &&
+          (change.operation === "delete" ||
+            !foundRecordIds.has(change.entity_id)),
+      )
+      .map((change) => change.entity_id),
+    deletedMessageIds: [...latest.values()]
+      .filter(
+        (change) =>
+          change.entity === "message" &&
+          (change.operation === "delete" ||
+            !foundMessageIds.has(change.entity_id)),
+      )
+      .map((change) => change.entity_id),
+  };
+}
+
+export interface HouseholdExport {
+  schemaVersion: 1;
+  exportedAt: string;
+  baby: Baby;
+  caregivers: Array<{
+    id: number;
+    email: string;
+    displayName: string;
+    role: "administrator" | "caregiver";
+    createdAt: string;
+  }>;
+  records: RoutineRecord[];
+  messages: ChatMessage[];
+}
+
+export function exportHouseholdData(
+  at = new Date(),
+  d: DatabaseT.Database = db,
+): HouseholdExport {
+  return d.transaction(() => ({
+    schemaVersion: 1 as const,
+    exportedAt: at.toISOString(),
+    baby: getBaby(d),
+    caregivers: (
+      d.prepare(
+        "SELECT id, email, display_name, role, created_at FROM users ORDER BY id",
+      ).all() as Array<{
+        id: number;
+        email: string;
+        display_name: string;
+        role: "administrator" | "caregiver";
+        created_at: string;
+      }>
+    ).map((user) => ({
+      id: user.id,
+      email: user.email,
+      displayName: user.display_name,
+      role: user.role,
+      createdAt: user.created_at,
+    })),
+    records: listRecords(d),
+    messages: listMessages(d),
+  }))();
+}
 
 // Most recent `limit` conversational messages (oldest first). Excludes daily
 // brief messages so they don't pollute the chat context window handed to the
@@ -492,6 +728,113 @@ export function completeChatRequest(
     return response;
   });
   return tx();
+}
+
+export type BriefRequestClaim =
+  | { state: "claimed" }
+  | { state: "pending" }
+  | { state: "completed"; message: ChatMessage | null; reason?: string };
+
+interface BriefRequestRow {
+  state: "pending" | "completed" | "skipped";
+  claimed_at: string;
+  message_id: number | null;
+  reason: string | null;
+}
+
+export function claimBriefRequest(
+  input: { localDate: string; at: string; staleAfterMs?: number },
+  d: DatabaseT.Database = db,
+): BriefRequestClaim {
+  const staleAfterMs = input.staleAfterMs ?? 5 * 60_000;
+  const staleBefore = new Date(
+    Date.parse(input.at) - staleAfterMs,
+  ).toISOString();
+  const tx = d.transaction((): BriefRequestClaim => {
+    const existing = d
+      .prepare(
+        "SELECT state, claimed_at, message_id, reason FROM brief_requests WHERE local_date = ?",
+      )
+      .get(input.localDate) as BriefRequestRow | undefined;
+    if (!existing) {
+      d.prepare(
+        "INSERT INTO brief_requests (local_date, state, claimed_at) VALUES (?, 'pending', ?)",
+      ).run(input.localDate, input.at);
+      return { state: "claimed" };
+    }
+    if (existing.state === "completed" || existing.state === "skipped") {
+      return {
+        state: "completed",
+        message:
+          existing.message_id === null
+            ? null
+            : getMessage(existing.message_id, d),
+        ...(existing.reason ? { reason: existing.reason } : {}),
+      };
+    }
+    if (existing.claimed_at >= staleBefore) return { state: "pending" };
+    const reclaimed = d
+      .prepare(
+        `UPDATE brief_requests SET claimed_at = ?
+         WHERE local_date = ? AND state = 'pending' AND claimed_at = ?`,
+      )
+      .run(input.at, input.localDate, existing.claimed_at);
+    return reclaimed.changes === 1 ? { state: "claimed" } : { state: "pending" };
+  });
+  return tx.immediate();
+}
+
+export function completeBriefRequest(
+  input: {
+    localDate: string;
+    at: string;
+    text?: string;
+    reason?: string;
+  },
+  d: DatabaseT.Database = db,
+): { message: ChatMessage | null; reason?: string } {
+  const tx = d.transaction(() => {
+    const row = d
+      .prepare(
+        "SELECT state, claimed_at, message_id, reason FROM brief_requests WHERE local_date = ?",
+      )
+      .get(input.localDate) as BriefRequestRow | undefined;
+    if (!row) throw new Error("brief request is not claimed");
+    if (row.state !== "pending") {
+      return {
+        message: row.message_id === null ? null : getMessage(row.message_id, d),
+        ...(row.reason ? { reason: row.reason } : {}),
+      };
+    }
+
+    let message: ChatMessage | null = null;
+    if (input.text !== undefined) {
+      const info = d
+        .prepare(
+          "INSERT INTO messages (sender, at, text, record_ids, kind) VALUES ('bot', ?, ?, '[]', 'brief')",
+        )
+        .run(input.at, input.text);
+      message = getMessage(Number(info.lastInsertRowid), d);
+      if (!message) throw new Error("failed to create brief message");
+    }
+    const state = message ? "completed" : "skipped";
+    d.prepare(
+      `UPDATE brief_requests
+       SET state = ?, completed_at = ?, message_id = ?, reason = ?
+       WHERE local_date = ? AND state = 'pending'`,
+    ).run(
+      state,
+      input.at,
+      message?.id ?? null,
+      input.reason ?? null,
+      input.localDate,
+    );
+    return {
+      message,
+      ...(input.reason ? { reason: input.reason } : {}),
+    };
+  });
+  return tx.immediate();
 }
 
 // True if a brief message already exists with `at` in [startIso, endIso).

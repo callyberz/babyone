@@ -1,22 +1,24 @@
 import { serve } from "@hono/node-server";
 import {
   bulkDeleteRecords,
+  claimBriefRequest,
   claimChatRequest,
   completeChatRequest,
+  completeBriefRequest,
   db,
   deleteRecord,
+  exportHouseholdData,
   findRecords,
   getBaby,
-  getKv,
   getRecord,
-  hasBriefInRange,
+  getSyncDelta,
+  getSyncSnapshot,
   insertMessage,
   insertRecord,
   listMessages,
   listRecentChatMessages,
   listRecords,
   setBaby,
-  setKv,
   updateRecord,
 } from "./db.js";
 import { createApp } from "./app.js";
@@ -53,13 +55,15 @@ const app = createApp({
   deleteRecord,
   bulkDeleteRecords,
   listMessages,
+  getSyncSnapshot,
+  getSyncDelta,
+  exportHouseholdData,
   listRecentChatMessages,
   insertMessage,
   claimChatRequest,
   completeChatRequest,
-  hasBriefInRange,
-  getKv,
-  setKv,
+  claimBriefRequest,
+  completeBriefRequest,
 });
 
 const port = Number(process.env.PORT ?? 8787);

@@ -14,6 +14,7 @@ import {
   useBaby,
   useBulkDeleteRecords,
   useDeleteRecord,
+  useHouseholdSync,
   useRecords,
   useUpdateBaby,
   useUpdateRecord,
@@ -62,6 +63,7 @@ function AuthenticatedApp({ user }: { user: User }) {
   const [editingBaby, setEditingBaby] = useState(false);
 
   const recordsQuery = useRecords();
+  const syncQuery = useHouseholdSync();
   const babyQuery = useBaby();
   const updateRecordMut = useUpdateRecord();
   const updateBabyMut = useUpdateBaby();
@@ -70,7 +72,7 @@ function AuthenticatedApp({ user }: { user: User }) {
 
   const records = recordsQuery.data ?? [];
   const baby = babyQuery.data ?? null;
-  const loadError = recordsQuery.error ?? babyQuery.error;
+  const loadError = syncQuery.error ?? recordsQuery.error ?? babyQuery.error;
   const loadErr = loadError instanceof Error ? loadError.message : null;
 
   useEffect(() => {

@@ -27,6 +27,8 @@
 
 - Volume `babyone_data` mounted at `/data`. Single machine, **not replicated**.
 - SQLite at `/data/data.db` via `BABYONE_DB` env.
+- SQLite runs in WAL mode. Never treat a raw copy of `/data/data.db` as a
+  backup: committed data may still be in `/data/data.db-wal`.
 
 ## Secrets
 
@@ -62,15 +64,63 @@ fly ips list -a babyone
 fly ips release <ip-v4> -a babyone
 fly ips release <ip-v6> -a babyone
 
-# Back up the SQLite DB
-fly ssh sftp get /data/data.db ./babyone-backup.db -a babyone
-
 # Destroy app (irreversible — deletes volume + data)
 fly apps destroy babyone
 
 # Re-deploy after code changes
 fly deploy
 ```
+
+## Database backup and recovery verification
+
+The supported backup command uses SQLite's online backup API while the app is
+running. It then converts the snapshot to a self-contained, single-file
+journal, runs `PRAGMA integrity_check`, verifies the required schema, and prints
+key table counts. It refuses to overwrite an existing destination.
+
+Choose a unique UTC-stamped name and run:
+
+```bash
+# 1. Create and validate the snapshot on the persistent Fly volume.
+fly ssh console -a babyone -C "node dist/ops/databaseBackup.js backup --source /data/data.db --output /data/backups/babyone-2026-08-13T1900Z.db"
+
+# 2. Download the verified artifact to the operator recovery directory.
+mkdir -p ./backups
+fly ssh sftp get /data/backups/babyone-2026-08-13T1900Z.db ./backups/babyone-2026-08-13T1900Z.db -a babyone
+
+# 3. Verify restoration from a disposable local copy. This never opens the
+#    configured BABYONE_DB and does not mutate the downloaded artifact.
+npm run build
+npm --workspace server run db:verify-restore -- --file ./backups/babyone-2026-08-13T1900Z.db
+```
+
+The local recovery location is `./backups/` (database files are gitignored).
+Move verified backups to encrypted, access-controlled storage according to the
+household's retention policy. The Fly copy under `/data/backups/` is useful for
+quick recovery but is on the same unreplicated volume and is not an off-site
+backup.
+
+For a local or one-off database, the equivalent command is:
+
+```bash
+npm run build
+npm --workspace server run db:backup -- --source ./server/data.db --output ./backups/babyone-local.db
+```
+
+Important recovery cautions:
+
+- `db:verify-restore` verifies a disposable copy; it deliberately does not
+  replace production data.
+- Never upload over `/data/data.db`, rename database files, or remove `-wal` /
+  `-shm` files while the application machine is running.
+- Before a production replacement, retain both the downloaded verified backup
+  and a fresh pre-restore online backup. Stop all writers, perform the swap in a
+  maintenance window, and start only one machine against the volume.
+- After replacement, confirm `/api/health`, sign-in, baby profile, record and
+  message counts before removing the pre-restore copy. If those checks fail,
+  keep the machine stopped and roll back to the pre-restore snapshot.
+- Do not use `fly ssh sftp get /data/data.db`; copying only the live WAL-mode
+  main file is not a recoverable backup procedure.
 
 ## First-time setup (for reference)
 

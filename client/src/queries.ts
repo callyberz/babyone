@@ -1,8 +1,15 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { api } from "./api";
 import type {
   Baby,
   ChatMessage,
+  HouseholdSync,
   RoutineRecord,
   RoutineRecordDraft,
 } from "@babyone/contracts";
@@ -11,31 +18,83 @@ import { useMe } from "./auth/useAuth";
 export const recordsKey = ["records"] as const;
 export const messagesKey = ["messages"] as const;
 export const babyKey = ["baby"] as const;
+export const syncKey = ["household-sync"] as const;
 
 const sortRecords = (rs: RoutineRecord[]) =>
   [...rs].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
 
 export function useRecords() {
-  const me = useMe();
   return useQuery({
     queryKey: recordsKey,
     queryFn: api.listRecords,
     select: sortRecords,
-    enabled: !!me.data,
-    refetchInterval: 15_000,
-    refetchIntervalInBackground: false,
+    enabled: false,
   });
 }
 
 export function useMessages() {
-  const me = useMe();
   return useQuery({
     queryKey: messagesKey,
     queryFn: api.listMessages,
+    enabled: false,
+  });
+}
+
+const mergeById = <T extends { id: number }>(
+  current: T[] | undefined,
+  incoming: T[],
+  deletedIds: number[],
+): T[] => {
+  const deleted = new Set(deletedIds);
+  const byId = new Map(
+    (current ?? [])
+      .filter((item) => !deleted.has(item.id))
+      .map((item) => [item.id, item]),
+  );
+  for (const item of incoming) byId.set(item.id, item);
+  return [...byId.values()];
+};
+
+export function applyHouseholdSync(
+  qc: Pick<QueryClient, "setQueryData">,
+  sync: HouseholdSync,
+): void {
+  qc.setQueryData<RoutineRecord[]>(recordsKey, (current) =>
+    sortRecords(
+      sync.full
+        ? sync.records
+        : mergeById(current, sync.records, sync.deletedRecordIds),
+    ),
+  );
+  qc.setQueryData<ChatMessage[]>(messagesKey, (current) =>
+    (sync.full
+      ? sync.messages
+      : mergeById(current, sync.messages, sync.deletedMessageIds)
+    ).sort((a, b) =>
+      a.at === b.at ? a.id - b.id : a.at.localeCompare(b.at),
+    ),
+  );
+}
+
+export function useHouseholdSync() {
+  const me = useMe();
+  const qc = useQueryClient();
+  const query = useQuery({
+    queryKey: syncKey,
+    queryFn: () => {
+      const previous = qc.getQueryData<HouseholdSync>(syncKey);
+      return api.sync(previous?.cursor);
+    },
     enabled: !!me.data,
     refetchInterval: 15_000,
     refetchIntervalInBackground: false,
   });
+
+  useEffect(() => {
+    if (query.data) applyHouseholdSync(qc, query.data);
+  }, [qc, query.data]);
+
+  return query;
 }
 
 export function useUpdateBaby() {
@@ -135,7 +194,15 @@ export function useChat() {
           ...incoming,
         ];
       });
-      qc.invalidateQueries({ queryKey: recordsKey });
+      qc.setQueryData<RoutineRecord[]>(recordsKey, (records) =>
+        sortRecords(
+          mergeById(
+            records,
+            [...res.created, ...res.updated],
+            res.deleted,
+          ),
+        ),
+      );
     },
   });
 }

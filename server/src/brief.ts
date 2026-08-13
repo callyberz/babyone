@@ -21,12 +21,71 @@ export interface BriefWindow {
   todayEnd: string;
 }
 
+function zonedParts(at: Date, timeZone: string): Record<string, number> {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(at);
+  return Object.fromEntries(
+    parts
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, Number(part.value)]),
+  );
+}
+
+function zonedMidnight(localDate: string, timeZone: string): Date {
+  const [year, month, day] = localDate.split("-").map(Number);
+  const targetWallMs = Date.UTC(year, month - 1, day);
+  let candidateMs = targetWallMs;
+  // Offset can change around the target (DST). Re-evaluate until the instant's
+  // wall-clock representation matches the requested local midnight.
+  for (let i = 0; i < 4; i += 1) {
+    const part = zonedParts(new Date(candidateMs), timeZone);
+    const representedWallMs = Date.UTC(
+      part.year!,
+      part.month! - 1,
+      part.day!,
+      part.hour!,
+      part.minute!,
+      part.second!,
+    );
+    const next = candidateMs + (targetWallMs - representedWallMs);
+    if (next === candidateMs) return new Date(next);
+    candidateMs = next;
+  }
+  return new Date(candidateMs);
+}
+
+function addCalendarDays(localDate: string, days: number): string {
+  const [year, month, day] = localDate.split("-").map(Number);
+  const shifted = new Date(Date.UTC(year, month - 1, day + days));
+  return shifted.toISOString().slice(0, 10);
+}
+
 // localDate is the client's *today* (YYYY-MM-DD) in its local timezone.
 // tzOffsetMin is Date#getTimezoneOffset() — minutes WEST of UTC (e.g. 240 for UTC-4).
 export function computeBriefWindow(
   localDate: string,
   tzOffsetMin: number,
+  timeZone?: string | null,
 ): BriefWindow {
+  if (timeZone) {
+    const yesterdayDate = addCalendarDays(localDate, -1);
+    const baselineDate = addCalendarDays(localDate, -8);
+    const tomorrowDate = addCalendarDays(localDate, 1);
+    return {
+      yesterdayStart: zonedMidnight(yesterdayDate, timeZone).toISOString(),
+      yesterdayEnd: zonedMidnight(localDate, timeZone).toISOString(),
+      baselineStart: zonedMidnight(baselineDate, timeZone).toISOString(),
+      todayEnd: zonedMidnight(tomorrowDate, timeZone).toISOString(),
+    };
+  }
   const [y, m, d] = localDate.split("-").map(Number);
   // Local midnight of `localDate`, expressed as a UTC instant.
   const todayStartMs = Date.UTC(y, m - 1, d) + tzOffsetMin * 60 * 1000;

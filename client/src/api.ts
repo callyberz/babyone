@@ -1,6 +1,7 @@
 import type {
   Baby,
   ChatMessage,
+  HouseholdSync,
   RoutineRecord,
   RoutineRecordDraft,
   User,
@@ -34,6 +35,47 @@ const post = (path: string, body: unknown): Promise<Response> =>
     body: JSON.stringify(body),
   });
 
+const exportFilename = (response: Response): string => {
+  const disposition = response.headers.get("content-disposition") ?? "";
+  const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  const quoted = disposition.match(/filename="([^"]+)"/i)?.[1];
+  const plain = disposition.match(/filename=([^;]+)/i)?.[1];
+  let decoded: string | undefined;
+  if (encoded) {
+    try {
+      decoded = decodeURIComponent(encoded);
+    } catch {
+      decoded = undefined;
+    }
+  }
+  const candidate =
+    decoded ?? quoted ?? plain?.trim() ?? "babyone-household-export.json";
+  return candidate.split(/[\\/]/).pop() || "babyone-household-export.json";
+};
+
+const downloadResponse = async (response: Response): Promise<void> => {
+  if (response.status === 401) throw new UnauthenticatedError();
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as
+      | { error?: string }
+      | null;
+    throw new Error(body?.error ?? `${response.status} ${response.statusText}`);
+  }
+  const filename = exportFilename(response);
+  const url = URL.createObjectURL(await response.blob());
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.hidden = true;
+  document.body.appendChild(anchor);
+  try {
+    anchor.click();
+  } finally {
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }
+};
+
 export const api = {
   baby: () => req("/api/baby").then((r) => json<Baby>(r)),
   updateBaby: (baby: Baby) =>
@@ -60,10 +102,15 @@ export const api = {
       json<{ deleted: number[] }>(r),
     ),
   listMessages: () => req("/api/messages").then((r) => json<ChatMessage[]>(r)),
+  sync: (after?: number) =>
+    req(after === undefined ? "/api/sync" : `/api/sync?after=${after}`).then(
+      (r) => json<HouseholdSync>(r),
+    ),
   brief: () =>
     post("/api/brief/today", {
       localDate: new Date().toLocaleDateString("en-CA"),
       tzOffsetMin: new Date().getTimezoneOffset(),
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     }).then((r) => json<{ message: ChatMessage | null }>(r)),
   chat: ({ text, requestId }: { text: string; requestId: string }) =>
     post("/api/chat", {
@@ -98,4 +145,5 @@ export const api = {
     post("/api/invites", {}).then((r) =>
       json<{ code: string; expiresAt: string; url: string }>(r),
     ),
+  downloadExport: () => req("/api/export").then(downloadResponse),
 };

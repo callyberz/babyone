@@ -51,13 +51,15 @@ const app = createApp({
   deleteRecord: repository.deleteRecord,
   bulkDeleteRecords: repository.bulkDeleteRecords,
   listMessages: repository.listMessages,
+  getSyncSnapshot: repository.getSyncSnapshot,
+  getSyncDelta: repository.getSyncDelta,
+  exportHouseholdData: repository.exportHouseholdData,
   listRecentChatMessages: repository.listRecentChatMessages,
   insertMessage: repository.insertMessage,
   claimChatRequest: repository.claimChatRequest,
   completeChatRequest: repository.completeChatRequest,
-  hasBriefInRange: repository.hasBriefInRange,
-  getKv: repository.getKv,
-  setKv: repository.setKv,
+  claimBriefRequest: repository.claimBriefRequest,
+  completeBriefRequest: repository.completeBriefRequest,
   now: () => new Date("2026-08-13T15:00:00.000Z"),
 });
 
@@ -66,10 +68,12 @@ beforeEach(() => {
     DELETE FROM invites;
     DELETE FROM sessions;
     DELETE FROM chat_requests;
+    DELETE FROM brief_requests;
     DELETE FROM messages;
     DELETE FROM records;
     DELETE FROM users;
     DELETE FROM kv;
+    DELETE FROM sync_changes;
   `);
   repository.ensureBaby(db, new Date("2026-08-11T12:00:00.000Z"));
   authenticatedUserId = Number(
@@ -99,11 +103,14 @@ function request(
     rawBody?: string;
     authenticated?: boolean;
     origin?: string | null;
+    sessionCookie?: string;
   } = {},
 ) {
   const method = options.method ?? "GET";
   const headers: Record<string, string> = {};
-  if (options.authenticated !== false) headers.Cookie = cookie;
+  if (options.authenticated !== false) {
+    headers.Cookie = options.sessionCookie ?? cookie;
+  }
   if (["POST", "PUT", "DELETE", "PATCH"].includes(method)) {
     headers["Content-Type"] = "application/json";
     if (options.origin !== null) headers.Origin = options.origin ?? ORIGIN;
@@ -231,6 +238,97 @@ describe("record routes", () => {
     expect(repository.listRecords()).toEqual([]);
   });
 
+  it("serves a full household snapshot followed by incremental changes", async () => {
+    const created = repository.insertRecord({
+      ...recordDraft,
+      userId: authenticatedUserId,
+    });
+    repository.insertMessage({
+      from: "bot",
+      at: "2026-08-13T14:31:00.000Z",
+      text: "Logged.",
+      recordIds: [created.id],
+    });
+
+    const initial = await request("/api/sync");
+    expect(initial.status).toBe(200);
+    const snapshot = (await initial.json()) as {
+      full: boolean;
+      cursor: number;
+      records: Array<{ id: number; title: string }>;
+      messages: Array<{ text: string }>;
+    };
+    expect(snapshot).toMatchObject({ full: true, hasMore: false });
+    expect(snapshot.records.map((record) => record.id)).toEqual([created.id]);
+    expect(snapshot.messages.map((message) => message.text)).toEqual(["Logged."]);
+
+    repository.updateRecord({ ...created, title: "Updated diaper" });
+    const second = repository.insertRecord({
+      ...recordDraft,
+      at: "2026-08-13T14:40:00.000Z",
+      title: "Second diaper",
+    });
+    repository.deleteRecord(second.id);
+
+    const delta = await request(`/api/sync?after=${snapshot.cursor}`);
+    expect(delta.status).toBe(200);
+    expect(await delta.json()).toMatchObject({
+      full: false,
+      hasMore: false,
+      records: [{ id: created.id, title: "Updated diaper" }],
+      deletedRecordIds: [second.id],
+      messages: [],
+      deletedMessageIds: [],
+    });
+
+    expect((await request("/api/sync?after=-1")).status).toBe(400);
+  });
+
+  it("exports a secret-free household archive for administrators only", async () => {
+    const caregiverId = Number(
+      db
+        .prepare(
+          "INSERT INTO users (email, password_hash, display_name, role, created_at) VALUES (?, ?, ?, 'caregiver', ?)",
+        )
+        .run(
+          "caregiver@example.com",
+          "never-export-this-hash",
+          "Caregiver",
+          "2026-08-02T00:00:00Z",
+        ).lastInsertRowid,
+    );
+    repository.insertRecord({ ...recordDraft, userId: authenticatedUserId });
+
+    const response = await request("/api/export");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-disposition")).toBe(
+      'attachment; filename="babyone-household-2026-08-13.json"',
+    );
+    const text = await response.text();
+    expect(text).not.toContain("never-export-this-hash");
+    const archive = JSON.parse(text) as {
+      schemaVersion: number;
+      exportedAt: string;
+      caregivers: Array<{ id: number; displayName: string }>;
+      records: unknown[];
+    };
+    expect(archive).toMatchObject({
+      schemaVersion: 1,
+      exportedAt: "2026-08-13T15:00:00.000Z",
+    });
+    expect(archive.caregivers.map((user) => user.displayName)).toEqual([
+      "Admin",
+      "Caregiver",
+    ]);
+    expect(archive.records).toHaveLength(1);
+
+    const caregiverCookie = `bo_sid=${createSession(db, caregiverId, "integration-test")}`;
+    const forbidden = await request("/api/export", {
+      sessionCookie: caregiverCookie,
+    });
+    expect(forbidden.status).toBe(403);
+  });
+
   it("returns consistent validation and not-found responses", async () => {
     const invalid = await request("/api/records", {
       method: "POST",
@@ -327,5 +425,59 @@ describe("chat and brief routes", () => {
       reason: "insufficient_data",
     });
     expect(generateBriefText).not.toHaveBeenCalled();
+  });
+
+  it("allows only one concurrent brief generation", async () => {
+    const yesterday = [
+      ["feed", "2026-08-12T12:00:00.000Z", "Feed 1", { volume_oz: 3 }],
+      ["sleep", "2026-08-12T14:00:00.000Z", "Nap", { mins: 45 }],
+      ["diaper", "2026-08-12T16:00:00.000Z", "Wet", { kind: "wet" }],
+    ] as const;
+    for (const [type, at, title, meta] of yesterday) {
+      repository.insertRecord({ type, at, title, detail: "", meta } as never);
+    }
+
+    let release!: (value: string) => void;
+    generateBriefText.mockImplementationOnce(
+      () => new Promise<string>((resolve) => { release = resolve; }),
+    );
+    const firstPromise = request("/api/brief/today", {
+      method: "POST",
+      body: {
+        localDate: "2026-08-13",
+        tzOffsetMin: 240,
+        timeZone: "America/Toronto",
+      },
+    });
+    await vi.waitFor(() => expect(generateBriefText).toHaveBeenCalledTimes(1));
+    const second = await request("/api/brief/today", {
+      method: "POST",
+      body: {
+        localDate: "2026-08-13",
+        tzOffsetMin: 240,
+        timeZone: "America/Toronto",
+      },
+    });
+    expect(second.status).toBe(409);
+    expect(await second.json()).toEqual({ message: null, reason: "in_progress" });
+
+    release("One generated brief.");
+    const first = await firstPromise;
+    expect(first.status).toBe(200);
+    expect(generateBriefText).toHaveBeenCalledTimes(1);
+    expect(
+      repository.listMessages().filter((message) => message.kind === "brief"),
+    ).toHaveLength(1);
+
+    const completed = await request("/api/brief/today", {
+      method: "POST",
+      body: { localDate: "2026-08-13", tzOffsetMin: 240 },
+    });
+    expect(completed.status).toBe(200);
+    expect(await completed.json()).toMatchObject({
+      reason: "already_generated",
+      message: { text: "One generated brief." },
+    });
+    expect(generateBriefText).toHaveBeenCalledTimes(1);
   });
 });

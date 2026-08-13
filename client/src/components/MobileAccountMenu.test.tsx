@@ -1,8 +1,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MobileAccountMenu } from "./Sidebar";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 function renderMenu(
   overrides: Partial<React.ComponentProps<typeof MobileAccountMenu>> = {},
@@ -82,5 +87,88 @@ describe("MobileAccountMenu", () => {
     expect(
       screen.queryByRole("dialog", { name: "Settings" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("exports household data for administrators", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("{}", {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "content-disposition": 'attachment; filename="household.json"',
+        },
+      }),
+    );
+    const createObjectURL = vi.fn().mockReturnValue("blob:household");
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("URL", {
+      createObjectURL,
+      revokeObjectURL: vi.fn(),
+    });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(
+      () => undefined,
+    );
+    renderMenu();
+    const user = userEvent.setup();
+
+    await user.click(
+      screen.getByRole("button", { name: "Caregiver settings for Calvin" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Export household data" }),
+    );
+
+    expect(
+      await screen.findByRole("status"),
+    ).toHaveTextContent("Household data export downloaded.");
+    expect(fetchMock).toHaveBeenCalledWith("/api/export", {
+      credentials: "include",
+    });
+  });
+
+  it("does not offer household export to caregivers", async () => {
+    renderMenu({
+      user: {
+        id: 2,
+        email: "caregiver@example.com",
+        displayName: "Maya",
+        isAdmin: false,
+      },
+    });
+    const user = userEvent.setup();
+
+    await user.click(
+      screen.getByRole("button", { name: "Caregiver settings for Maya" }),
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "Export household data" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("reports an export failure and enables another attempt", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: "export unavailable" }), {
+        status: 503,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderMenu();
+    const user = userEvent.setup();
+
+    await user.click(
+      screen.getByRole("button", { name: "Caregiver settings for Calvin" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Export household data" }),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "export unavailable",
+    );
+    expect(
+      screen.getByRole("button", { name: "Export household data" }),
+    ).toBeEnabled();
   });
 });

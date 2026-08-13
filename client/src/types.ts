@@ -1,6 +1,7 @@
 export type {
   Baby,
   ChatMessage,
+  HouseholdSync,
   KnownRecordType,
   RecordMeta,
   RecordType,

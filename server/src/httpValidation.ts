@@ -54,6 +54,19 @@ export function validateChatRequest(
 export interface BriefRequest {
   localDate: string;
   tzOffsetMin: number;
+  timeZone: string | null;
+}
+
+function isIanaTimezone(value: unknown): value is string {
+  if (typeof value !== "string" || value.length === 0 || value.length > 100) {
+    return false;
+  }
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: value }).format();
+    return value.includes("/") || value === "UTC";
+  } catch {
+    return false;
+  }
 }
 
 function isCalendarDate(value: unknown): value is string {
@@ -73,7 +86,8 @@ export function validateBriefRequest(
   if (
     !isObject(input) ||
     !isCalendarDate(input.localDate) ||
-    !isTimezoneOffset(input.tzOffsetMin)
+    !isTimezoneOffset(input.tzOffsetMin) ||
+    (input.timeZone !== undefined && !isIanaTimezone(input.timeZone))
   ) {
     return { ok: false };
   }
@@ -82,6 +96,7 @@ export function validateBriefRequest(
     value: {
       localDate: input.localDate,
       tzOffsetMin: input.tzOffsetMin,
+      timeZone: input.timeZone === undefined ? null : input.timeZone,
     },
   };
 }
@@ -90,6 +105,15 @@ export function parseRecordId(value: string): number | null {
   if (!/^[1-9]\d*$/.test(value)) return null;
   const id = Number(value);
   return Number.isSafeInteger(id) ? id : null;
+}
+
+export function parseSyncCursor(
+  value: string | undefined,
+): number | null | false {
+  if (value === undefined) return null;
+  if (!/^(0|[1-9]\d*)$/.test(value)) return false;
+  const cursor = Number(value);
+  return Number.isSafeInteger(cursor) ? cursor : false;
 }
 
 export function validateBulkDeleteRequest(
