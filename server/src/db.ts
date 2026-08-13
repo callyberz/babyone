@@ -72,6 +72,7 @@ const dbPath = process.env.BABYONE_DB ?? path.resolve(__dirname, "../data.db");
 export const db = new Database(dbPath);
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
+db.pragma("busy_timeout = 5000");
 
 export function applyCoreSchema(d: DatabaseT.Database): void {
   d.exec(`
@@ -102,6 +103,19 @@ export function applyCoreSchema(d: DatabaseT.Database): void {
   `);
 
   applyAuthSchema(d);
+  d.exec(`
+    CREATE TABLE IF NOT EXISTS chat_requests (
+      user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      request_id      TEXT NOT NULL,
+      text            TEXT NOT NULL,
+      user_message_id INTEGER NOT NULL REFERENCES messages(id),
+      response_json   TEXT,
+      created_at      TEXT NOT NULL,
+      PRIMARY KEY (user_id, request_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_chat_requests_created
+      ON chat_requests(created_at);
+  `);
   const messageColumns = d.prepare("PRAGMA table_info(messages)").all() as {
     name: string;
   }[];
@@ -345,6 +359,140 @@ export const insertMessage = (m: Omit<ChatMessage, "id">): ChatMessage => {
     .run(m.from, m.at, m.text, JSON.stringify(m.recordIds ?? []), kind);
   return { ...m, kind, id: Number(info.lastInsertRowid) };
 };
+
+export interface ChatApiResponse {
+  userMsg: ChatMessage;
+  botMsg: ChatMessage;
+  created: RoutineRecord[];
+  updated: RoutineRecord[];
+  deleted: number[];
+}
+
+export type ChatRequestClaim =
+  | { state: "claimed"; userMsg: ChatMessage }
+  | { state: "completed"; response: ChatApiResponse }
+  | { state: "pending" }
+  | { state: "conflict" };
+
+interface ChatRequestRow {
+  text: string;
+  user_message_id: number;
+  response_json: string | null;
+}
+
+const getMessage = (
+  id: number,
+  d: DatabaseT.Database = db,
+): ChatMessage | null => {
+  const row = d.prepare("SELECT * FROM messages WHERE id = ?").get(id) as
+    | MessageRow
+    | undefined;
+  return row ? rowToMessage(row) : null;
+};
+
+export function claimChatRequest(
+  input: {
+    userId: number;
+    requestId: string;
+    text: string;
+    at: string;
+  },
+  d: DatabaseT.Database = db,
+): ChatRequestClaim {
+  const tx = d.transaction((): ChatRequestClaim => {
+    const existing = d
+      .prepare(
+        "SELECT text, user_message_id, response_json FROM chat_requests WHERE user_id = ? AND request_id = ?",
+      )
+      .get(input.userId, input.requestId) as ChatRequestRow | undefined;
+    if (existing) {
+      if (existing.text !== input.text) return { state: "conflict" };
+      if (existing.response_json) {
+        return {
+          state: "completed",
+          response: JSON.parse(existing.response_json) as ChatApiResponse,
+        };
+      }
+      return { state: "pending" };
+    }
+
+    const messageInfo = d
+      .prepare(
+        "INSERT INTO messages (sender, at, text, record_ids, kind) VALUES ('user', ?, ?, '[]', 'chat')",
+      )
+      .run(input.at, input.text);
+    const userMessageId = Number(messageInfo.lastInsertRowid);
+    d.prepare(
+      "INSERT INTO chat_requests (user_id, request_id, text, user_message_id, created_at) VALUES (?, ?, ?, ?, ?)",
+    ).run(
+      input.userId,
+      input.requestId,
+      input.text,
+      userMessageId,
+      input.at,
+    );
+    const userMsg = getMessage(userMessageId, d);
+    if (!userMsg) throw new Error("failed to create chat request message");
+    return { state: "claimed", userMsg };
+  });
+  return tx();
+}
+
+export function completeChatRequest(
+  input: {
+    userId: number;
+    requestId: string;
+    bot: Omit<ChatMessage, "id">;
+    created: RoutineRecord[];
+    updated: RoutineRecord[];
+    deleted: number[];
+  },
+  d: DatabaseT.Database = db,
+): ChatApiResponse {
+  const tx = d.transaction((): ChatApiResponse => {
+    const request = d
+      .prepare(
+        "SELECT text, user_message_id, response_json FROM chat_requests WHERE user_id = ? AND request_id = ?",
+      )
+      .get(input.userId, input.requestId) as ChatRequestRow | undefined;
+    if (!request) throw new Error("chat request is not claimed");
+    if (request.response_json) {
+      return JSON.parse(request.response_json) as ChatApiResponse;
+    }
+    const userMsg = getMessage(request.user_message_id, d);
+    if (!userMsg) throw new Error("chat request user message is missing");
+
+    const kind: MessageKind = input.bot.kind ?? "chat";
+    const botInfo = d
+      .prepare(
+        "INSERT INTO messages (sender, at, text, record_ids, kind) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run(
+        input.bot.from,
+        input.bot.at,
+        input.bot.text,
+        JSON.stringify(input.bot.recordIds ?? []),
+        kind,
+      );
+    const botMsg: ChatMessage = {
+      ...input.bot,
+      kind,
+      id: Number(botInfo.lastInsertRowid),
+    };
+    const response: ChatApiResponse = {
+      userMsg,
+      botMsg,
+      created: input.created,
+      updated: input.updated,
+      deleted: input.deleted,
+    };
+    d.prepare(
+      "UPDATE chat_requests SET response_json = ? WHERE user_id = ? AND request_id = ?",
+    ).run(JSON.stringify(response), input.userId, input.requestId);
+    return response;
+  });
+  return tx();
+}
 
 // True if a brief message already exists with `at` in [startIso, endIso).
 export const hasBriefInRange = (startIso: string, endIso: string): boolean => {

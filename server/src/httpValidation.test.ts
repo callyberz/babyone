@@ -10,13 +10,23 @@ import {
 
 describe("validateChatRequest", () => {
   it("accepts and trims text with an optional valid timezone offset", () => {
-    expect(validateChatRequest({ text: "  wet diaper  ", tzOffsetMin: 240 })).toEqual({
+    expect(
+      validateChatRequest({
+        text: "  wet diaper  ",
+        tzOffsetMin: 240,
+        requestId: "d9729c80-8c58-4c74-a1a2-231807c0a031",
+      }),
+    ).toEqual({
       ok: true,
-      value: { text: "wet diaper", tzOffsetMin: 240 },
+      value: {
+        text: "wet diaper",
+        tzOffsetMin: 240,
+        requestId: "d9729c80-8c58-4c74-a1a2-231807c0a031",
+      },
     });
     expect(validateChatRequest({ text: "hello" })).toEqual({
       ok: true,
-      value: { text: "hello", tzOffsetMin: null },
+      value: { text: "hello", tzOffsetMin: null, requestId: null },
     });
   });
 
@@ -32,6 +42,9 @@ describe("validateChatRequest", () => {
     { text: "hello", tzOffsetMin: Number.POSITIVE_INFINITY },
     { text: "hello", tzOffsetMin: 60.5 },
     { text: "hello", tzOffsetMin: 841 },
+    { text: "hello", requestId: "short" },
+    { text: "hello", requestId: "spaces are not valid" },
+    { text: "hello", requestId: "x".repeat(129) },
   ])("rejects an invalid chat body: %j", (body) => {
     expect(validateChatRequest(body)).toEqual({ ok: false });
   });

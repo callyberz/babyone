@@ -14,11 +14,25 @@ const SUGGESTIONS = [
   "How much sleep today?",
 ];
 
+type LocalChatMessage = ChatMessage & {
+  requestId: string;
+  sendState: "sending" | "failed";
+  error?: string;
+};
+
+const newRequestId = (): string => {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+};
+
 export function ChatScreen({ records }: { records: RoutineRecord[] }) {
   const { data: messages = [] } = useMessages();
   const { data: briefData } = useBrief();
   const chatMutation = useChat();
-  const [extras, setExtras] = useState<ChatMessage[]>([]);
+  const [extras, setExtras] = useState<LocalChatMessage[]>([]);
+  const nextTempId = useRef(-1);
   const briefMsg = briefData?.message ?? null;
   const chat = useMemo(() => {
     // The brief is also persisted server-side: same session it shows via the
@@ -104,38 +118,64 @@ export function ChatScreen({ records }: { records: RoutineRecord[] }) {
     return m;
   }, [records]);
 
+  const submit = (local: LocalChatMessage) => {
+    setExtras((current) => {
+      const exists = current.some(
+        (message) => message.requestId === local.requestId,
+      );
+      if (!exists) return [...current, local];
+      return current.map((message) =>
+        message.requestId === local.requestId
+          ? { ...message, sendState: "sending", error: undefined }
+          : message,
+      );
+    });
+
+    chatMutation.mutate(
+      { text: local.text, requestId: local.requestId },
+      {
+        onSuccess: () => {
+          setExtras((current) =>
+            current.filter(
+              (message) => message.requestId !== local.requestId,
+            ),
+          );
+        },
+        onError: (err) => {
+          setExtras((current) =>
+            current.map((message) =>
+              message.requestId === local.requestId
+                ? {
+                    ...message,
+                    sendState: "failed",
+                    error:
+                      err instanceof Error
+                        ? err.message
+                        : "Could not reach the server",
+                  }
+                : message,
+            ),
+          );
+        },
+      },
+    );
+  };
+
   const send = (textOverride?: string) => {
     const text = (textOverride ?? draft).trim();
     if (!text || typing) return;
     setDraft("");
 
-    const tempId = -Date.now();
-    const tempUser: ChatMessage = {
-      id: tempId,
+    const tempUser: LocalChatMessage = {
+      id: nextTempId.current--,
       from: "user",
       at: new Date().toISOString(),
       text,
       recordIds: [],
+      requestId: newRequestId(),
+      sendState: "sending",
     };
-    setExtras((e) => [...e, tempUser]);
-
-    chatMutation.mutate(text, {
-      onSuccess: () => {
-        setExtras((e) => e.filter((m) => m.id !== tempId));
-      },
-      onError: (err) => {
-        setExtras((e) => [
-          ...e,
-          {
-            id: Date.now(),
-            from: "bot",
-            at: new Date().toISOString(),
-            text: `Couldn't reach the server — ${(err as Error).message}`,
-            recordIds: [],
-          },
-        ]);
-      },
-    });
+    submit(tempUser);
   };
 
   const onKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement> = (e) => {
@@ -167,18 +207,39 @@ export function ChatScreen({ records }: { records: RoutineRecord[] }) {
       >
         {pillLabel ?? ""}
       </div>
-      <div className="chat-stream" ref={streamRef}>
+      <div
+        className="chat-stream"
+        ref={streamRef}
+        role="log"
+        aria-label="Conversation"
+        aria-live="polite"
+      >
         {grouped.map((g) =>
           g.kind === "day" ? (
             <div className="day-break" key={g.key}>
               {g.label}
             </div>
           ) : (
-            <ChatBubble key={g.key} m={g.msg} recById={recById} />
+            <ChatBubble
+              key={g.key}
+              m={g.msg}
+              recById={recById}
+              retryDisabled={typing}
+              onRetry={(message) => submit(message)}
+              onDiscard={(requestId) =>
+                setExtras((current) =>
+                  current.filter((message) => message.requestId !== requestId),
+                )
+              }
+            />
           ),
         )}
         {typing && (
-          <div className="msg bot">
+          <div
+            className="msg bot"
+            role="status"
+            aria-label="Clement is responding"
+          >
             <div className="msg-avatar bot">c</div>
             <div className="msg-bubble">
               <div className="typing">
@@ -203,6 +264,7 @@ export function ChatScreen({ records }: { records: RoutineRecord[] }) {
         <div className="composer-inner">
           <textarea
             ref={taRef}
+            aria-label="Message Clement"
             placeholder="Tell me what just happened — e.g. 'fed 3oz at 2pm' or 'nap for 45 min'"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -211,6 +273,7 @@ export function ChatScreen({ records }: { records: RoutineRecord[] }) {
           />
           <button
             className="composer-send"
+            aria-label="Send message"
             disabled={!draft.trim() || typing}
             onClick={() => void send()}
           >
@@ -229,12 +292,23 @@ export function ChatScreen({ records }: { records: RoutineRecord[] }) {
 function ChatBubble({
   m,
   recById,
+  retryDisabled,
+  onRetry,
+  onDiscard,
 }: {
-  m: ChatMessage;
+  m: ChatMessage | LocalChatMessage;
   recById: Map<number, RoutineRecord>;
+  retryDisabled: boolean;
+  onRetry: (message: LocalChatMessage) => void;
+  onDiscard: (requestId: string) => void;
 }) {
+  const local = "requestId" in m ? m : null;
+  const failed = local?.sendState === "failed";
   return (
-    <div className={`msg ${m.from}`} data-at={m.at}>
+    <div
+      className={`msg ${m.from}${failed ? " send-failed" : ""}`}
+      data-at={m.at}
+    >
       <div className={`msg-avatar ${m.from}`}>
         {m.from === "bot" ? "c" : "M"}
       </div>
@@ -256,7 +330,32 @@ function ChatBubble({
             </div>
           );
         })}
-        <div className="msg-time">{fmtTime(m.at)}</div>
+        <div className="msg-time">
+          {fmtTime(m.at)}
+          {local?.sendState === "sending" && " · Sending…"}
+        </div>
+        {failed && local && (
+          <div className="send-failure" role="alert">
+            <span>Not sent{local.error ? ` — ${local.error}` : ""}</span>
+            <div className="send-failure-actions">
+              <button
+                type="button"
+                className="send-failure-action"
+                disabled={retryDisabled}
+                onClick={() => onRetry(local)}
+              >
+                Retry
+              </button>
+              <button
+                type="button"
+                className="send-failure-action"
+                onClick={() => onDiscard(local.requestId)}
+              >
+                Discard
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -127,11 +127,14 @@ export function useChat() {
   return useMutation({
     mutationFn: api.chat,
     onSuccess: (res) => {
-      qc.setQueryData<ChatMessage[]>(messagesKey, (ms) => [
-        ...(ms ?? []),
-        res.userMsg,
-        res.botMsg,
-      ]);
+      qc.setQueryData<ChatMessage[]>(messagesKey, (ms) => {
+        const incoming = [res.userMsg, res.botMsg];
+        const incomingIds = new Set(incoming.map((message) => message.id));
+        return [
+          ...(ms ?? []).filter((message) => !incomingIds.has(message.id)),
+          ...incoming,
+        ];
+      });
       qc.invalidateQueries({ queryKey: recordsKey });
     },
   });

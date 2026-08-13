@@ -26,6 +26,20 @@ export function createInvite(
   return { code, createdBy, expiresAt: expiresAt.toISOString() };
 }
 
+export function isInviteAvailable(
+  db: DatabaseT.Database,
+  code: string,
+  now = new Date(),
+): boolean {
+  return Boolean(
+    db
+      .prepare(
+        "SELECT 1 FROM invites WHERE code = ? AND consumed_by IS NULL AND expires_at > ? LIMIT 1",
+      )
+      .get(code, now.toISOString()),
+  );
+}
+
 // Returns true if the invite was valid and is now marked consumed by `userId`.
 export function consumeInvite(
   db: DatabaseT.Database,

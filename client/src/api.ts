@@ -65,9 +65,10 @@ export const api = {
       localDate: new Date().toLocaleDateString("en-CA"),
       tzOffsetMin: new Date().getTimezoneOffset(),
     }).then((r) => json<{ message: ChatMessage | null }>(r)),
-  chat: (text: string) =>
+  chat: ({ text, requestId }: { text: string; requestId: string }) =>
     post("/api/chat", {
       text,
+      requestId,
       tzOffsetMin: new Date().getTimezoneOffset(),
     }).then((r) =>
       json<{

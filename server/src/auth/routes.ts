@@ -1,4 +1,4 @@
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 import { setCookie, deleteCookie, getCookie } from "hono/cookie";
 import type DatabaseT from "better-sqlite3";
 import { hashPassword, verifyPassword, dummyVerify } from "./passwords.js";
@@ -8,8 +8,8 @@ import {
   findSession,
   SESSION_TTL_MS,
 } from "./sessions.js";
-import { createInvite, consumeInvite } from "./invites.js";
-import { LoginRateLimiter } from "./rateLimit.js";
+import { createInvite, consumeInvite, isInviteAvailable } from "./invites.js";
+import { LoginRateLimiter, type RateLimitDecision } from "./rateLimit.js";
 import { isAdmin, type AuthEnv } from "./middleware.js";
 
 const COOKIE = "bo_sid";
@@ -22,15 +22,78 @@ const cookieOpts = (maxAgeMs: number) => ({
   maxAge: Math.floor(maxAgeMs / 1000),
 });
 
-// Exported so tests can call loginRl.reset(...) in beforeEach to prevent
-// the 429 test from bleeding into subsequent describe blocks.
-export const loginRl = new LoginRateLimiter({
+const EMAIL_MAX = 254;
+const PASSWORD_MAX = 256;
+const DISPLAY_NAME_MAX = 80;
+const INVITE_CODE_MAX = 128;
+const USER_AGENT_MAX = 512;
+const RATE_WINDOW_MS = 15 * 60_000;
+
+export const loginIpRl = new LoginRateLimiter({
+  maxAttempts: 30,
+  windowMs: RATE_WINDOW_MS,
+});
+export const loginAccountIpRl = new LoginRateLimiter({
   maxAttempts: 10,
-  windowMs: 15 * 60_000,
+  windowMs: RATE_WINDOW_MS,
+});
+export const signupIpRl = new LoginRateLimiter({
+  maxAttempts: 20,
+  windowMs: RATE_WINDOW_MS,
+});
+export const signupInviteRl = new LoginRateLimiter({
+  maxAttempts: 10,
+  windowMs: RATE_WINDOW_MS,
+  caseInsensitive: false,
 });
 
-function asString(v: unknown): string | null {
-  return typeof v === "string" && v.length > 0 ? v : null;
+export function resetAuthRateLimiters(): void {
+  loginIpRl.clear();
+  loginAccountIpRl.clear();
+  signupIpRl.clear();
+  signupInviteRl.clear();
+}
+
+function asBoundedString(
+  value: unknown,
+  maxLength: number,
+  trim = false,
+): string | null {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > maxLength
+  ) {
+    return null;
+  }
+  const normalized = trim ? value.trim() : value;
+  return normalized.length > 0 ? normalized : null;
+}
+
+function clientIp(c: Context<AuthEnv>): string {
+  const forwarded =
+    c.req.header("Fly-Client-IP") ??
+    c.req.header("CF-Connecting-IP") ??
+    c.req.header("X-Forwarded-For")?.split(",", 1)[0];
+  return forwarded?.trim().slice(0, 128) || "unknown";
+}
+
+function userAgent(c: Context<AuthEnv>): string | null {
+  const value = c.req.header("User-Agent") ?? "";
+  return value.length <= USER_AGENT_MAX ? value : null;
+}
+
+function rateLimited(
+  c: Context<AuthEnv>,
+  decisions: RateLimitDecision[],
+) {
+  const blocked = decisions.filter((decision) => !decision.allowed);
+  if (blocked.length === 0) return null;
+  const retryAfter = Math.max(
+    ...blocked.map((decision) => decision.retryAfterSeconds),
+  );
+  c.header("Retry-After", String(retryAfter));
+  return c.json({ error: "too_many_attempts" }, 429);
 }
 
 export function mountAuthRoutes(
@@ -42,15 +105,21 @@ export function mountAuthRoutes(
       string,
       unknown
     >;
-    const email = asString(body.email)?.toLowerCase();
-    const password = asString(body.password);
-    if (!email || !password) {
+    const email = asBoundedString(body.email, EMAIL_MAX, true)?.toLowerCase();
+    const password = asBoundedString(body.password, PASSWORD_MAX);
+    const agent = userAgent(c);
+    if (!email || !password || agent === null) {
       return c.json({ error: "bad_request" }, 400);
     }
 
-    if (!loginRl.check(email)) {
-      return c.json({ error: "too_many_attempts" }, 429);
-    }
+    const ip = clientIp(c);
+    const loginLimit = rateLimited(c, [
+      loginIpRl.checkDetailed(ip),
+      // Scope the account key by source IP so one remote attacker cannot lock
+      // a caregiver out globally merely by knowing their email address.
+      loginAccountIpRl.checkDetailed(`${ip}\u0000${email}`),
+    ]);
+    if (loginLimit) return loginLimit;
 
     const row = db
       .prepare(
@@ -73,8 +142,9 @@ export function mountAuthRoutes(
       return c.json({ error: "invalid_credentials" }, 401);
     }
 
-    loginRl.reset(email);
-    const sid = createSession(db, row.id, c.req.header("User-Agent") ?? "");
+    loginIpRl.reset(ip);
+    loginAccountIpRl.reset(`${ip}\u0000${email}`);
+    const sid = createSession(db, row.id, agent);
     setCookie(c, COOKIE, sid, cookieOpts(SESSION_TTL_MS));
     return c.json({
       user: {
@@ -91,15 +161,38 @@ export function mountAuthRoutes(
       string,
       unknown
     >;
-    const code = asString(body.code);
-    const email = asString(body.email)?.toLowerCase();
-    const password = asString(body.password);
-    const displayName = asString(body.displayName);
-    if (!code || !email || !password || !displayName) {
+    const code = asBoundedString(body.code, INVITE_CODE_MAX, true);
+    const email = asBoundedString(body.email, EMAIL_MAX, true)?.toLowerCase();
+    const password = asBoundedString(body.password, PASSWORD_MAX);
+    const displayName = asBoundedString(
+      body.displayName,
+      DISPLAY_NAME_MAX,
+      true,
+    );
+    const agent = userAgent(c);
+    if (!code || !email || !password || !displayName || agent === null) {
       return c.json({ error: "bad_request" }, 400);
     }
     if (password.length < 8) {
       return c.json({ error: "weak_password" }, 400);
+    }
+
+    const signupLimit = rateLimited(c, [
+      signupIpRl.checkDetailed(clientIp(c)),
+      signupInviteRl.checkDetailed(code),
+    ]);
+    if (signupLimit) return signupLimit;
+
+    // Reject random, expired, and consumed codes before paying the Argon2
+    // cost. consumeInvite() below remains the authoritative atomic claim.
+    if (!isInviteAvailable(db, code)) {
+      return c.json({ error: "invalid_invite" }, 400);
+    }
+    const existingEmail = db
+      .prepare("SELECT 1 FROM users WHERE email = ? LIMIT 1")
+      .get(email);
+    if (existingEmail) {
+      return c.json({ error: "email_taken" }, 400);
     }
 
     const hash = await hashPassword(password);
@@ -118,7 +211,7 @@ export function mountAuthRoutes(
         return userId;
       });
       const userId = tx();
-      const sid = createSession(db, userId, c.req.header("User-Agent") ?? "");
+      const sid = createSession(db, userId, agent);
       setCookie(c, COOKIE, sid, cookieOpts(SESSION_TTL_MS));
       return c.json({
         user: {

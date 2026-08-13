@@ -30,6 +30,16 @@ primary_region = 'yyz'
     hard_limit = 100
     soft_limit = 50
 
+  [[http_service.checks]]
+    grace_period = '10s'
+    interval = '30s'
+    method = 'GET'
+    path = '/api/health'
+    timeout = '5s'
+
+    [http_service.checks.headers]
+      X-Forwarded-Proto = 'https'
+
 [[vm]]
   memory = '512mb'
   cpus = 1

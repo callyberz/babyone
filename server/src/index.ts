@@ -1,265 +1,86 @@
 import { serve } from "@hono/node-server";
-import { serveStatic } from "@hono/node-server/serve-static";
-import { Hono } from "hono";
-import { cors } from "hono/cors";
 import {
   bulkDeleteRecords,
+  claimChatRequest,
+  completeChatRequest,
   db,
   deleteRecord,
   findRecords,
   getBaby,
-  getRecord,
   getKv,
+  getRecord,
   hasBriefInRange,
   insertMessage,
   insertRecord,
   listMessages,
   listRecentChatMessages,
   listRecords,
-  setKv,
   setBaby,
+  setKv,
   updateRecord,
 } from "./db.js";
-import { seedIfEmpty, bootstrapAuth } from "./seed.js";
+import { createApp } from "./app.js";
+import { generateBriefText } from "./brief.js";
 import { getLlmStatus, llmParse } from "./llm.js";
-import {
-  aggregateBaseline,
-  aggregateDay,
-  computeBriefWindow,
-  generateBriefText,
-} from "./brief.js";
-import {
-  validateBaby,
-  validateRecordDraft,
-  type RoutineRecord,
-} from "./types.js";
-import {
-  originGuard,
-  makeRequireAuth,
-  isAdmin,
-  type AuthEnv,
-} from "./auth/middleware.js";
-import { mountAuthRoutes, mountInviteRoutes } from "./auth/routes.js";
-import { cleanupExpiredSessions } from "./auth/sessions.js";
+import { bootstrapAuth, seedIfEmpty } from "./seed.js";
 import { cleanupExpiredInvites } from "./auth/invites.js";
-import {
-  parseRecordId,
-  validateBriefRequest,
-  validateBulkDeleteRequest,
-  validateChatRequest,
-} from "./httpValidation.js";
+import { cleanupExpiredSessions } from "./auth/sessions.js";
 
-// Seed demo data first so the admin backfill in bootstrapAuth() attributes
-// freshly-seeded records to the admin on a brand-new database.
 if (process.env.BABYONE_SEED_DEMO === "1") seedIfEmpty();
 await bootstrapAuth();
 cleanupExpiredSessions(db);
 cleanupExpiredInvites(db);
 
-const app = new Hono<AuthEnv>();
-
 const origin = process.env.BABYONE_ORIGIN ?? "http://localhost:5173";
-app.use(
-  "/api/*",
-  cors({
-    origin,
-    credentials: true,
-    allowMethods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-    allowHeaders: ["Content-Type"],
-  }),
-);
-
-app.use("/api/*", originGuard);
-
-// Open routes (mounted BEFORE requireAuth so they pass through).
-app.get("/api/health", (c) => c.json({ ok: true, llm: getLlmStatus() }));
-mountAuthRoutes(app, db);
-
-// Everything else under /api/* requires a valid session.
-const requireAuth = makeRequireAuth(db);
-app.use("/api/*", requireAuth);
-
-// Gated auth-adjacent routes (must come AFTER requireAuth).
-mountInviteRoutes(app, db);
-
-app.get("/api/baby", (c) => c.json(getBaby()));
-
-app.put("/api/baby", async (c) => {
-  const body = await c.req.json().catch(() => null);
-  const validation = validateBaby(body);
-  if (!validation.ok) {
-    return c.json({ error: "invalid_baby", issues: validation.issues }, 400);
-  }
-  return c.json(setBaby(validation.value));
-});
-
-app.get("/api/records", (c) => c.json(listRecords()));
-
-app.post("/api/records", async (c) => {
-  const body = await c.req.json().catch(() => null);
-  const validation = validateRecordDraft(body);
-  if (!validation.ok) {
-    return c.json({ error: "invalid_record", issues: validation.issues }, 400);
-  }
-  const user = c.get("user");
-  return c.json(insertRecord({ ...validation.value, userId: user.id }));
-});
-
-app.put("/api/records/:id", async (c) => {
-  const id = parseRecordId(c.req.param("id"));
-  if (id === null) return c.json({ error: "bad_request" }, 400);
-  const existing = getRecord(id);
-  if (!existing) return c.json({ error: "not_found" }, 404);
-  const body = await c.req.json().catch(() => null);
-  const validation = validateRecordDraft(body);
-  if (!validation.ok) {
-    return c.json({ error: "invalid_record", issues: validation.issues }, 400);
-  }
-  return c.json(
-    updateRecord({
-      ...validation.value,
-      id,
-      user: existing.user,
-    } as RoutineRecord),
-  );
-});
-
-app.delete("/api/records/:id", (c) => {
-  const id = parseRecordId(c.req.param("id"));
-  if (id === null) return c.json({ error: "bad_request" }, 400);
-  if (!getRecord(id)) return c.json({ error: "not_found" }, 404);
-  deleteRecord(id);
-  return c.json({ ok: true });
-});
-
-app.post("/api/records/bulk-delete", async (c) => {
-  const user = c.get("user");
-  if (!isAdmin(user)) return c.json({ error: "forbidden" }, 403);
-
-  const body: unknown = await c.req.json().catch(() => null);
-  const validation = validateBulkDeleteRequest(body);
-  if (!validation.ok) {
-    return c.json({ error: "bad_request" }, 400);
-  }
-
-  return c.json({ deleted: bulkDeleteRecords(validation.value) });
-});
-
-app.get("/api/messages", (c) => c.json(listMessages()));
-
-app.post("/api/chat", async (c) => {
-  const body: unknown = await c.req.json().catch(() => null);
-  const validation = validateChatRequest(body);
-  if (!validation.ok) return c.json({ error: "bad_request" }, 400);
-  const { text, tzOffsetMin } = validation.value;
-  const now = new Date();
-  const sessionUser = c.get("user");
-
-  // Recent conversation (~5 turns), gathered BEFORE inserting the current
-  // message, so the model can resolve cross-turn references like "I mean Jul 7
-  // morning". Duplicate records from re-logged events are prevented at the
-  // insert layer (findDuplicateRecord in the MCP log_record handler).
-  const history = listRecentChatMessages(10).map((m) => ({
-    role: m.from === "user" ? ("user" as const) : ("assistant" as const),
-    text: m.text,
-  }));
-
-  const userMsg = insertMessage({
-    from: "user",
-    at: now.toISOString(),
-    text,
-    recordIds: [],
-  });
-
-  const result = await llmParse(
-    text,
-    now,
-    sessionUser.id,
-    tzOffsetMin,
-    history,
-  );
-  const recordIds = [
-    ...result.created.map((r) => r.id),
-    ...result.updated.map((r) => r.id),
-  ];
-
-  const botMsg = insertMessage({
-    from: "bot",
-    at: new Date().toISOString(),
-    text: result.replyText,
-    recordIds,
-  });
-
-  return c.json({
-    userMsg,
-    botMsg,
-    created: result.created,
-    updated: result.updated,
-    deleted: result.deleted,
-  });
-});
-
-app.post("/api/brief/today", async (c) => {
-  const body: unknown = await c.req.json().catch(() => null);
-  const validation = validateBriefRequest(body);
-  if (!validation.ok) return c.json({ error: "bad_request" }, 400);
-  const { localDate, tzOffsetMin } = validation.value;
-
-  if (getKv("brief.lastDate") === localDate) {
-    return c.json({ message: null, reason: "already_generated" });
-  }
-
-  const { yesterdayStart, yesterdayEnd, baselineStart, todayEnd } =
-    computeBriefWindow(localDate, tzOffsetMin);
-
-  // Belt-and-suspenders: if the kv flag was lost (DB restore, manual edit),
-  // fall back to checking whether a brief message already exists for today.
-  if (hasBriefInRange(yesterdayEnd, todayEnd)) {
-    setKv("brief.lastDate", localDate);
-    return c.json({ message: null, reason: "already_generated" });
-  }
-
-  const all = findRecords({
-    since: baselineStart,
-    until: yesterdayEnd,
-    limit: 2000,
-  });
-  const yesterdayRecords = all.filter(
-    (r) => r.at >= yesterdayStart && r.at < yesterdayEnd,
-  );
-  const baselineRecords = all.filter((r) => r.at < yesterdayStart);
-
-  if (yesterdayRecords.length <= 2) {
-    setKv("brief.lastDate", localDate);
-    return c.json({ message: null, reason: "insufficient_data" });
-  }
-
-  const yest = aggregateDay(yesterdayRecords);
-  const { avg } = aggregateBaseline(
-    baselineRecords,
-    new Date(baselineStart),
-    new Date(yesterdayStart),
-  );
-  const text = await generateBriefText(yest, avg);
-
-  const msg = insertMessage({
-    from: "bot",
-    at: new Date().toISOString(),
-    text,
-    recordIds: [],
-    kind: "brief",
-  });
-  setKv("brief.lastDate", localDate);
-  return c.json({ message: msg });
-});
-
 const staticRoot = process.env.STATIC_ROOT ?? "../client/dist";
-app.use("/assets/*", serveStatic({ root: staticRoot }));
-app.get("*", serveStatic({ root: staticRoot, path: "index.html" }));
+const app = createApp({
+  db,
+  origin,
+  staticRoot,
+  checkDatabase: () => {
+    db.prepare("SELECT 1").get();
+  },
+  getLlmStatus,
+  llmParse,
+  generateBriefText,
+  getBaby,
+  setBaby,
+  listRecords,
+  findRecords,
+  getRecord,
+  insertRecord,
+  updateRecord,
+  deleteRecord,
+  bulkDeleteRecords,
+  listMessages,
+  listRecentChatMessages,
+  insertMessage,
+  claimChatRequest,
+  completeChatRequest,
+  hasBriefInRange,
+  getKv,
+  setKv,
+});
 
 const port = Number(process.env.PORT ?? 8787);
 const hostname = process.env.HOST ?? "0.0.0.0";
-serve({ fetch: app.fetch, port, hostname });
+const server = serve({ fetch: app.fetch, port, hostname });
 console.log(
   `[babyone] server listening on http://${hostname}:${port}  llm=${getLlmStatus().state}`,
 );
+
+let shuttingDown = false;
+const shutdown = (signal: string) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[babyone] ${signal} received; closing cleanly`);
+  server.close(() => {
+    try {
+      db.pragma("wal_checkpoint(TRUNCATE)");
+    } finally {
+      db.close();
+    }
+  });
+};
+process.once("SIGTERM", () => shutdown("SIGTERM"));
+process.once("SIGINT", () => shutdown("SIGINT"));

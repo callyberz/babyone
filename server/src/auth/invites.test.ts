@@ -5,6 +5,7 @@ import {
   createInvite,
   consumeInvite,
   cleanupExpiredInvites,
+  isInviteAvailable,
   INVITE_TTL_MS,
 } from "./invites.js";
 
@@ -46,7 +47,9 @@ describe("invites", () => {
 
   it("consumes a valid invite once", () => {
     const inv = createInvite(db, userId);
+    expect(isInviteAvailable(db, inv.code)).toBe(true);
     expect(consumeInvite(db, inv.code, userId)).toBe(true);
+    expect(isInviteAvailable(db, inv.code)).toBe(false);
     expect(consumeInvite(db, inv.code, userId)).toBe(false);
   });
 
@@ -55,6 +58,7 @@ describe("invites", () => {
     db.prepare(
       "INSERT INTO invites (code, created_by, created_at, expires_at) VALUES (?, ?, ?, ?)",
     ).run(code, userId, new Date(0).toISOString(), new Date(0).toISOString());
+    expect(isInviteAvailable(db, code)).toBe(false);
     expect(consumeInvite(db, code, userId)).toBe(false);
   });
 

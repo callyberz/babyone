@@ -595,6 +595,11 @@ button:focus-visible {
   border-color: transparent;
   border-bottom-right-radius: 4px;
 }
+.msg.user.send-failed .msg-bubble {
+  border-color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 18%, var(--bg-elev));
+  color: var(--ink);
+}
 .msg.bot .msg-bubble {
   border-bottom-left-radius: 4px;
 }
@@ -602,6 +607,40 @@ button:focus-visible {
   font-size: 11px;
   color: var(--ink-3);
   margin-top: 4px;
+}
+
+.send-failure {
+  max-width: 360px;
+  margin-top: 5px;
+  color: var(--warn);
+  font-size: 12px;
+  text-align: right;
+}
+
+.send-failure-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 3px;
+}
+
+.send-failure-action {
+  min-height: 30px;
+  padding: 3px 8px;
+  border-radius: 7px;
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.send-failure-action:hover {
+  background: var(--card-2);
+  color: var(--ink);
+}
+
+.send-failure-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .record-card {

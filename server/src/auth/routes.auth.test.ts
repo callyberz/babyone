@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import Database from "better-sqlite3";
 import { applyAuthSchema } from "../db.js";
 import { hashPassword } from "./passwords.js";
-import { mountAuthRoutes, loginRl } from "./routes.js";
+import { mountAuthRoutes, resetAuthRateLimiters } from "./routes.js";
 import type { AuthEnv } from "./middleware.js";
 
 let db: Database.Database;
@@ -31,7 +31,7 @@ beforeEach(async () => {
 
   // Reset the module-level rate limiter so the 429 test doesn't bleed into
   // subsequent describe blocks (me / logout) that also call login.
-  loginRl.reset("alice@example.com");
+  resetAuthRateLimiters();
 });
 
 const post = (path: string, body: unknown, cookie?: string) =>
@@ -109,6 +109,80 @@ describe("POST /api/auth/login", () => {
       password: "hunter22",
     });
     expect(res.status).toBe(429);
+    expect(Number(res.headers.get("retry-after"))).toBeGreaterThan(0);
+  });
+
+  it("does not let attempts from one IP lock the account for another IP", async () => {
+    for (let i = 0; i < 10; i++) {
+      await app.request("/api/auth/login", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "Fly-Client-IP": "203.0.113.10",
+        },
+        body: JSON.stringify({ email: "alice@example.com", password: "wrong" }),
+      });
+    }
+
+    const res = await app.request("/api/auth/login", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "Fly-Client-IP": "203.0.113.11",
+      },
+      body: JSON.stringify({ email: "alice@example.com", password: "hunter22" }),
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("rate-limits one IP across attempted account names", async () => {
+    for (let i = 0; i < 30; i++) {
+      const res = await app.request("/api/auth/login", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "Fly-Client-IP": "203.0.113.20",
+        },
+        body: JSON.stringify({
+          email: `unknown-${i}@example.com`,
+          password: "wrong",
+        }),
+      });
+      expect(res.status).toBe(401);
+    }
+
+    const blocked = await app.request("/api/auth/login", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "Fly-Client-IP": "203.0.113.20",
+      },
+      body: JSON.stringify({
+        email: "one-more@example.com",
+        password: "wrong",
+      }),
+    });
+    expect(blocked.status).toBe(429);
+    expect(Number(blocked.headers.get("retry-after"))).toBeGreaterThan(0);
+  });
+
+  it("rejects oversized credentials and user agents before password work", async () => {
+    expect(
+      (await post("/api/auth/login", {
+        email: `${"a".repeat(255)}@example.com`,
+        password: "hunter22",
+      })).status,
+    ).toBe(400);
+
+    const oversizedAgent = await app.request("/api/auth/login", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "User-Agent": "a".repeat(513),
+      },
+      body: JSON.stringify({ email: "alice@example.com", password: "hunter22" }),
+    });
+    expect(oversizedAgent.status).toBe(400);
   });
 
   it("400 on missing fields", async () => {

@@ -18,7 +18,10 @@ const isTimezoneOffset = (value: unknown): value is number =>
 export interface ChatRequest {
   text: string;
   tzOffsetMin: number | null;
+  requestId: string | null;
 }
+
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
 
 export function validateChatRequest(
   input: unknown,
@@ -30,10 +33,21 @@ export function validateChatRequest(
 
   const offset = input.tzOffsetMin;
   if (offset !== undefined && !isTimezoneOffset(offset)) return { ok: false };
+  const requestId = input.requestId;
+  if (
+    requestId !== undefined &&
+    (typeof requestId !== "string" || !REQUEST_ID_PATTERN.test(requestId))
+  ) {
+    return { ok: false };
+  }
 
   return {
     ok: true,
-    value: { text, tzOffsetMin: offset === undefined ? null : offset },
+    value: {
+      text,
+      tzOffsetMin: offset === undefined ? null : offset,
+      requestId: requestId === undefined ? null : requestId,
+    },
   };
 }
 

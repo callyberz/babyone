@@ -4,7 +4,11 @@ import Database from "better-sqlite3";
 import { applyAuthSchema } from "../db.js";
 import { hashPassword } from "./passwords.js";
 import { createInvite } from "./invites.js";
-import { mountAuthRoutes, mountInviteRoutes, loginRl } from "./routes.js";
+import {
+  mountAuthRoutes,
+  mountInviteRoutes,
+  resetAuthRateLimiters,
+} from "./routes.js";
 import { makeRequireAuth, type AuthEnv } from "./middleware.js";
 
 const ORIGIN = "http://localhost:5173";
@@ -40,7 +44,7 @@ beforeEach(async () => {
 
   // Belt-and-suspenders: reset the module-level rate limiter so a 429 test
   // in another file (same worker, different describe block) cannot bleed in.
-  loginRl.reset("admin@example.com");
+  resetAuthRateLimiters();
 });
 
 const post = (path: string, body: unknown, cookie?: string) =>
@@ -120,6 +124,82 @@ describe("POST /api/auth/signup", () => {
     });
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "email_taken" });
+  });
+
+  it("bounds all signup fields and the user agent", async () => {
+    const inv = createInvite(db, adminId);
+    const base = {
+      code: inv.code,
+      email: "bob@example.com",
+      password: "longenough",
+      displayName: "Bob",
+    };
+    expect((await post("/api/auth/signup", { ...base, password: "p".repeat(257) })).status).toBe(400);
+    expect((await post("/api/auth/signup", { ...base, displayName: "x".repeat(81) })).status).toBe(400);
+    expect((await post("/api/auth/signup", { ...base, code: "x".repeat(129) })).status).toBe(400);
+
+    const res = await app.request("/api/auth/signup", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "User-Agent": "a".repeat(513),
+      },
+      body: JSON.stringify(base),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rate-limits signup by invite code and provides Retry-After", async () => {
+    for (let i = 0; i < 10; i++) {
+      const res = await post("/api/auth/signup", {
+        code: "unknown-code",
+        email: `person-${i}@example.com`,
+        password: "longenough",
+        displayName: "Person",
+      });
+      expect(res.status).toBe(400);
+    }
+    const blocked = await post("/api/auth/signup", {
+      code: "unknown-code",
+      email: "last@example.com",
+      password: "longenough",
+      displayName: "Person",
+    });
+    expect(blocked.status).toBe(429);
+    expect(Number(blocked.headers.get("retry-after"))).toBeGreaterThan(0);
+  });
+
+  it("rate-limits signup attempts across invite codes from one IP", async () => {
+    for (let i = 0; i < 20; i++) {
+      const res = await app.request("/api/auth/signup", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "Fly-Client-IP": "203.0.113.50",
+        },
+        body: JSON.stringify({
+          code: `unknown-${i}`,
+          email: `person-${i}@example.com`,
+          password: "longenough",
+          displayName: "Person",
+        }),
+      });
+      expect(res.status).toBe(400);
+    }
+    const blocked = await app.request("/api/auth/signup", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "Fly-Client-IP": "203.0.113.50",
+      },
+      body: JSON.stringify({
+        code: "one-more",
+        email: "last@example.com",
+        password: "longenough",
+        displayName: "Person",
+      }),
+    });
+    expect(blocked.status).toBe(429);
   });
 });
 
