@@ -101,10 +101,15 @@ export interface AppDependencies {
   }) => BriefRequestClaim;
   completeBriefRequest: (input: {
     localDate: string;
+    claimedAt: string;
     at: string;
     text?: string;
     reason?: string;
   }) => { message: ChatMessage | null; reason?: string };
+  releaseBriefRequest: (input: {
+    localDate: string;
+    claimedAt: string;
+  }) => boolean;
   now?: () => Date;
 }
 
@@ -365,45 +370,61 @@ export function createApp(deps: AppDependencies): Hono<AuthEnv> {
       });
     }
 
-    const { yesterdayStart, yesterdayEnd, baselineStart } =
-      computeBriefWindow(localDate, tzOffsetMin, timeZone);
+    try {
+      const { yesterdayStart, yesterdayEnd, baselineStart } =
+        computeBriefWindow(localDate, tzOffsetMin, timeZone);
 
-    const all = deps.findRecords({
-      since: baselineStart,
-      until: yesterdayEnd,
-      limit: 2000,
-    });
-    const yesterdayRecords = all.filter(
-      (record) => record.at >= yesterdayStart && record.at < yesterdayEnd,
-    );
-    const baselineRecords = all.filter(
-      (record) => record.at < yesterdayStart,
-    );
+      const all = deps.findRecords({
+        since: baselineStart,
+        until: yesterdayEnd,
+        limit: 2000,
+      });
+      const yesterdayRecords = all.filter(
+        (record) => record.at >= yesterdayStart && record.at < yesterdayEnd,
+      );
+      const baselineRecords = all.filter(
+        (record) => record.at < yesterdayStart,
+      );
 
-    if (yesterdayRecords.length <= 2) {
-      return c.json(
-        deps.completeBriefRequest({
+      if (yesterdayRecords.length <= 2) {
+        const completion = deps.completeBriefRequest({
           localDate,
+          claimedAt: claim.claimedAt,
           at: now().toISOString(),
           reason: "insufficient_data",
-        }),
-      );
-    }
+        });
+        if (completion.reason === "in_progress") {
+          c.header("Retry-After", "1");
+          return c.json(completion, 409);
+        }
+        return c.json(completion);
+      }
 
-    const yesterday = aggregateDay(yesterdayRecords);
-    const { avg } = aggregateBaseline(
-      baselineRecords,
-      new Date(baselineStart),
-      new Date(yesterdayStart),
-    );
-    const text = await deps.generateBriefText(yesterday, avg);
-    return c.json(
-      deps.completeBriefRequest({
+      const yesterday = aggregateDay(yesterdayRecords);
+      const { avg } = aggregateBaseline(
+        baselineRecords,
+        new Date(baselineStart),
+        new Date(yesterdayStart),
+      );
+      const text = await deps.generateBriefText(yesterday, avg);
+      const completion = deps.completeBriefRequest({
         localDate,
+        claimedAt: claim.claimedAt,
         at: now().toISOString(),
         text,
-      }),
-    );
+      });
+      if (completion.reason === "in_progress") {
+        c.header("Retry-After", "1");
+        return c.json(completion, 409);
+      }
+      return c.json(completion);
+    } catch (error) {
+      deps.releaseBriefRequest({
+        localDate,
+        claimedAt: claim.claimedAt,
+      });
+      throw error;
+    }
   });
 
   if (deps.staticRoot) {

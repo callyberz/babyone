@@ -7,9 +7,11 @@ import { Icon } from "./icons";
 export function CalendarScreen({
   records,
   openRecord,
+  babyName = "your baby",
 }: {
   records: RoutineRecord[];
   openRecord: (r: RoutineRecord) => void;
+  babyName?: string;
 }) {
   const [cursor, setCursor] = useState(() => {
     const d = new Date();
@@ -156,7 +158,9 @@ export function CalendarScreen({
         {sel.length === 1 ? "record" : "records"}
       </div>
       {sel.length === 0 ? (
-        <div className="empty">No records logged for this day.</div>
+        <div className="empty">
+          No records logged for {babyName} this day.
+        </div>
       ) : (
         <div
           style={{

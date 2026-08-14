@@ -14,7 +14,7 @@ afterEach(() => {
   fetchMock.mockReset();
 });
 
-function renderChat() {
+function renderChat(babyName?: string) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -34,7 +34,7 @@ function renderChat() {
   );
   return render(
     <QueryClientProvider client={queryClient}>
-      <ChatScreen records={[]} />
+      <ChatScreen records={[]} babyName={babyName} />
     </QueryClientProvider>,
   );
 }
@@ -65,6 +65,21 @@ function successResponse(text: string) {
 }
 
 describe("ChatScreen send recovery", () => {
+  it("uses the saved baby name in prompts without naming the assistant after the baby", () => {
+    renderChat("Riley");
+
+    expect(
+      screen.getByRole("button", {
+        name: "How much sleep has Riley had today?",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Message about Riley")).toHaveAttribute(
+      "placeholder",
+      expect.stringContaining("what happened with Riley"),
+    );
+    expect(screen.queryByText(/Clement/i)).not.toBeInTheDocument();
+  });
+
   it("retries a failed message with the same request ID and no duplicate bubble", async () => {
     let chatAttempts = 0;
     fetchMock.mockImplementation(async (input) => {
@@ -89,7 +104,10 @@ describe("ChatScreen send recovery", () => {
 
     renderChat();
     const user = userEvent.setup();
-    await user.type(screen.getByLabelText("Message Clement"), "Wet diaper");
+    await user.type(
+      screen.getByLabelText("Message about your baby"),
+      "Wet diaper",
+    );
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(
@@ -135,7 +153,10 @@ describe("ChatScreen send recovery", () => {
 
     renderChat();
     const user = userEvent.setup();
-    await user.type(screen.getByLabelText("Message Clement"), "Nap 45 min");
+    await user.type(
+      screen.getByLabelText("Message about your baby"),
+      "Nap 45 min",
+    );
     await user.click(screen.getByRole("button", { name: "Send message" }));
     await screen.findByText(/Not sent/);
 

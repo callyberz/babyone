@@ -24,16 +24,20 @@ import { LoginPage } from "./auth/LoginPage";
 import { SignupPage } from "./auth/SignupPage";
 import { ResetPasswordPage } from "./auth/ResetPasswordPage";
 import { Splash } from "./auth/Splash";
+import { getBabyDisplayName } from "./utils";
 
-const titles: Record<View, { t: string; s: string }> = {
+const titles: Record<View, { t: (babyName: string) => string; s: string }> = {
   chat: {
-    t: "Chat with Clement",
+    t: (babyName) => `Chat about ${babyName}`,
     s: "Tell me what just happened — I'll log it.",
   },
-  today: { t: "Today's timeline", s: "Everything that happened, in order." },
-  dash: { t: "Dashboard", s: "Today at a glance." },
-  trends: { t: "Trends", s: "Patterns over the last week or two." },
-  calendar: { t: "Calendar", s: "Browse history by day." },
+  today: {
+    t: (babyName) => `${babyName}'s timeline`,
+    s: "Everything that happened, in order.",
+  },
+  dash: { t: () => "Dashboard", s: "Today at a glance." },
+  trends: { t: () => "Trends", s: "Patterns over the last week or two." },
+  calendar: { t: () => "Calendar", s: "Browse history by day." },
 };
 
 const readView = (): View => {
@@ -76,6 +80,7 @@ function AuthenticatedApp({ user }: { user: User }) {
 
   const records = recordsQuery.data ?? [];
   const baby = babyQuery.data ?? null;
+  const babyName = getBabyDisplayName(baby);
   const loadError = syncQuery.error ?? recordsQuery.error ?? babyQuery.error;
   const loadErr = loadError instanceof Error ? loadError.message : null;
 
@@ -86,6 +91,14 @@ function AuthenticatedApp({ user }: { user: User }) {
     localStorage.setItem("clement.theme", theme);
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
+  useEffect(() => {
+    document.title = baby
+      ? `${babyName} — babyone`
+      : "babyone — Baby Routines";
+    return () => {
+      document.title = "babyone — Baby Routines";
+    };
+  }, [baby, babyName]);
 
   const updateRecord = async (record: RoutineRecord): Promise<void> => {
     await updateRecordMut.mutateAsync(record);
@@ -111,7 +124,7 @@ function AuthenticatedApp({ user }: { user: User }) {
       <main className="main">
         <header className="topbar">
           <div>
-            <h1>{titles[view].t}</h1>
+            <h1>{titles[view].t(babyName)}</h1>
             <div className="topbar-sub">
               {loadErr ? `Server offline: ${loadErr}` : titles[view].s}
             </div>
@@ -135,13 +148,16 @@ function AuthenticatedApp({ user }: { user: User }) {
           </div>
         </header>
         <div className="screen">
-          {view === "chat" && <ChatScreen records={records} />}
+          {view === "chat" && (
+            <ChatScreen records={records} babyName={babyName} />
+          )}
           {view === "today" && (
             <TodayScreen
               records={records}
               openRecord={setEditing}
               isAdmin={user.isAdmin}
               onBulkDelete={bulkDeleteRecords}
+              babyName={babyName}
             />
           )}
           {view === "dash" && (
@@ -155,7 +171,11 @@ function AuthenticatedApp({ user }: { user: User }) {
           )}
           {view === "trends" && <TrendsScreen records={records} />}
           {view === "calendar" && (
-            <CalendarScreen records={records} openRecord={setEditing} />
+            <CalendarScreen
+              records={records}
+              openRecord={setEditing}
+              babyName={babyName}
+            />
           )}
         </div>
       </main>

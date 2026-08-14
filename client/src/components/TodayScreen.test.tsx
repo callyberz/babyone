@@ -32,6 +32,20 @@ const records: RoutineRecord[] = [
 ];
 
 describe("TodayScreen timeline search", () => {
+  it("personalizes its empty state", () => {
+    render(
+      <TodayScreen
+        records={[]}
+        openRecord={vi.fn()}
+        babyName="Riley"
+      />,
+    );
+
+    expect(
+      screen.getByText("No records logged for Riley yet."),
+    ).toBeInTheDocument();
+  });
+
   it("searches titles, notes, categories, and structured record details", async () => {
     render(<TodayScreen records={records} openRecord={vi.fn()} />);
     const user = userEvent.setup();

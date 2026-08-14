@@ -4,9 +4,15 @@ import { Icon } from "./icons";
 import type { View } from "./views";
 import { InvitePanel } from "../auth/InvitePanel";
 import { CaregiverAccessPanel } from "../auth/CaregiverAccessPanel";
+import { SessionPanel } from "../auth/SessionPanel";
 import { useLogout } from "../auth/useAuth";
 import { api } from "../api";
-import { formatBabyAge, formatBabyWeight } from "../utils";
+import {
+  formatBabyAge,
+  formatBabyWeight,
+  getBabyDisplayName,
+  getBabyInitial,
+} from "../utils";
 
 const navItems: {
   id: View;
@@ -37,13 +43,19 @@ export function Sidebar({
   user: User;
   onEditBaby: () => void;
 }) {
+  const babyName = getBabyDisplayName(baby);
   return (
     <aside className="sidebar">
-      <div className="logo">
-        <div className="logo-mark">c</div>
+      <div
+        className="logo"
+        aria-label={baby ? `${babyName}'s babyone routines` : "babyone routines"}
+      >
+        <div className="logo-mark" aria-hidden="true">
+          {baby ? getBabyInitial(baby) : "b"}
+        </div>
         <div>
-          <div className="logo-name">clement</div>
-          <div className="logo-sub">routines</div>
+          <div className="logo-name">{baby ? babyName : "babyone"}</div>
+          <div className="logo-sub">babyone · routines</div>
         </div>
       </div>
 
@@ -80,11 +92,19 @@ function BabyProfileButton({
   onClick: () => void;
 }) {
   const weight = baby ? formatBabyWeight(baby) : null;
+  const babyName = getBabyDisplayName(baby);
   return (
-    <button className="baby-card baby-card-button" onClick={onClick}>
-      <div className="baby-avatar">{baby?.name?.[0] ?? "C"}</div>
+    <button
+      className="baby-card baby-card-button"
+      onClick={onClick}
+      disabled={!baby}
+      aria-label={baby ? `Edit ${babyName}'s profile` : "Baby profile loading"}
+    >
+      <div className="baby-avatar" aria-hidden="true">
+        {getBabyInitial(baby)}
+      </div>
       <div>
-        <div className="baby-name">{baby?.name ?? "Clement"}</div>
+        <div className="baby-name">{baby ? babyName : "Baby"}</div>
         <div className="baby-age">
           {baby
             ? `${formatBabyAge(baby.birthdate)} old${weight ? ` · ${weight}` : ""}`
@@ -140,6 +160,7 @@ function CaregiverControls({
         Signed in as <strong>{user.displayName}</strong>
       </div>
       <InvitePanel />
+      <SessionPanel />
       {user.isAdmin && <CaregiverAccessPanel currentUserId={user.id} />}
       {user.isAdmin && (
         <div className="export-control">

@@ -5,7 +5,10 @@ import { hashPassword, verifyPassword, dummyVerify } from "./passwords.js";
 import {
   createSession,
   deleteSession,
+  deleteSessionForUser,
   findSession,
+  listSessionsForUser,
+  sessionPublicId,
   SESSION_TTL_MS,
 } from "./sessions.js";
 import { createInvite, consumeInvite, isInviteAvailable } from "./invites.js";
@@ -350,6 +353,33 @@ export function mountInviteRoutes(
   app: Hono<AuthEnv>,
   db: DatabaseT.Database,
 ): void {
+  app.get("/api/auth/sessions", (c) => {
+    const user = c.get("user");
+    const currentId = getCookie(c, COOKIE);
+    const sessions = listSessionsForUser(db, user.id).map((session) => ({
+      ...session,
+      current: currentId ? session.id === sessionPublicId(currentId) : false,
+    }));
+    return c.json({ sessions });
+  });
+
+  app.delete("/api/auth/sessions/:id", (c) => {
+    const user = c.get("user");
+    const sessionId = c.req.param("id");
+    if (!/^[A-Za-z0-9_-]{32,128}$/.test(sessionId)) {
+      return c.json({ error: "bad_request" }, 400);
+    }
+    if (!deleteSessionForUser(db, sessionId, user.id)) {
+      return c.json({ error: "not_found" }, 404);
+    }
+    const currentSid = getCookie(c, COOKIE);
+    const current = currentSid
+      ? sessionId === sessionPublicId(currentSid)
+      : false;
+    if (current) deleteCookie(c, COOKIE, { path: "/" });
+    return c.json({ ok: true, current });
+  });
+
   app.post("/api/invites", (c) => {
     const user = c.get("user");
     const inv = createInvite(db, user.id);

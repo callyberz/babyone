@@ -132,6 +132,9 @@ button:focus-visible {
   align-items: center;
   gap: 10px;
 }
+.logo > div:last-child {
+  min-width: 0;
+}
 .logo-mark {
   width: 32px;
   height: 32px;
@@ -147,6 +150,9 @@ button:focus-visible {
 .logo-name {
   font-family: "Instrument Serif", serif;
   font-size: 22px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .logo-sub {
   font-size: 11px;
@@ -1526,6 +1532,15 @@ button:focus-visible {
 .caregiver-reset-link {
   display: grid;
   gap: 5px;
+}
+.session-revoke-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+.session-revoke-confirm > span {
+  flex-basis: 100%;
 }
 .caregiver-reset-link code {
   overflow-wrap: anywhere;

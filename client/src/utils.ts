@@ -1,5 +1,14 @@
 import type { Baby, RecordMeta } from "./types";
 
+export const getBabyDisplayName = (
+  baby: Pick<Baby, "name"> | null | undefined,
+): string => baby?.name.trim() || "your baby";
+
+export const getBabyInitial = (
+  baby: Pick<Baby, "name"> | null | undefined,
+): string =>
+  [...(baby?.name.trim() || "B")][0]?.toLocaleUpperCase() ?? "B";
+
 export const toDate = (s: string | Date) =>
   s instanceof Date ? s : new Date(s);
 

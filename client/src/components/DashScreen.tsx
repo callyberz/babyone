@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { aggregateLocalDays } from "@babyone/contracts";
 import type { Baby, RoutineRecord, User } from "../types";
 import { categories, getCategory } from "../types";
-import { fmtAgo, formatBabyAge } from "../utils";
+import { fmtAgo, formatBabyAge, getBabyDisplayName } from "../utils";
 import { Icon } from "./icons";
 import { QuickLog } from "./QuickLog";
 import type { View } from "./views";
@@ -21,15 +21,21 @@ export function DashScreen({
   onEditBaby: () => void;
 }) {
   const now = new Date();
+  const babyName = getBabyDisplayName(baby);
   const today = aggregateLocalDays(records, 1, now)[0];
   const [handoffSince] = useState(() => {
-    const stored = localStorage.getItem(`clement.handoff.${user.id}`);
+    const stored =
+      localStorage.getItem(`babyone.handoff.${user.id}`) ??
+      localStorage.getItem(`clement.handoff.${user.id}`);
     const parsed = stored ? Date.parse(stored) : Number.NaN;
     return Number.isNaN(parsed) ? Date.now() - 8 * 60 * 60 * 1000 : parsed;
   });
 
   useEffect(() => {
-    localStorage.setItem(`clement.handoff.${user.id}`, new Date().toISOString());
+    localStorage.setItem(
+      `babyone.handoff.${user.id}`,
+      new Date().toISOString(),
+    );
   }, [user.id]);
 
   const greeting = (() => {
@@ -59,7 +65,7 @@ export function DashScreen({
         <div>
           <div className="hero-greet">{greeting}.</div>
           <div className="hero-sub">
-            Here is what caregivers have recorded today.
+            Here is what caregivers have recorded for {babyName} today.
             {lastUpdate && <> Last update {fmtAgo(lastUpdate)}.</>}
           </div>
         </div>
@@ -76,7 +82,7 @@ export function DashScreen({
         <div className="now-heading">
           <div>
             <div className="eyebrow">Right now</div>
-            <h2>{baby?.name ?? "Baby"}</h2>
+            <h2>{babyName}</h2>
             {baby && <div className="now-age">{formatBabyAge(baby.birthdate)} old</div>}
           </div>
           <button className="btn btn-ghost" onClick={onEditBaby}>Edit profile</button>
@@ -117,7 +123,7 @@ export function DashScreen({
       </div>
 
       <div className="cards-row handoff-row">
-        <QuickLog babyName={baby?.name ?? "baby"} />
+        <QuickLog babyName={babyName} />
         <div className="panel">
           <div className="panel-h">
             <div>

@@ -53,6 +53,10 @@ bootstrap variables remaining in the environment.
 Additional caregivers join via one-time invite links generated in the sidebar
 ("Invite caregiver"). Invites expire after 24h.
 
+Every caregiver can review their active signed-in devices from the sidebar and
+revoke an old phone or browser. The management API exposes only irreversible
+session fingerprints, never reusable session cookies.
+
 Caregiver timelines update incrementally in the background, so long household
 histories are not downloaded again on every refresh. Administrators can also
 download a versioned, secret-free JSON household archive from the sidebar.

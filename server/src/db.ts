@@ -873,7 +873,7 @@ export function completeChatRequest(
 }
 
 export type BriefRequestClaim =
-  | { state: "claimed" }
+  | { state: "claimed"; claimedAt: string }
   | { state: "pending" }
   | { state: "completed"; message: ChatMessage | null; reason?: string };
 
@@ -902,7 +902,7 @@ export function claimBriefRequest(
       d.prepare(
         "INSERT INTO brief_requests (local_date, state, claimed_at) VALUES (?, 'pending', ?)",
       ).run(input.localDate, input.at);
-      return { state: "claimed" };
+      return { state: "claimed", claimedAt: input.at };
     }
     if (existing.state === "completed" || existing.state === "skipped") {
       return {
@@ -921,14 +921,30 @@ export function claimBriefRequest(
          WHERE local_date = ? AND state = 'pending' AND claimed_at = ?`,
       )
       .run(input.at, input.localDate, existing.claimed_at);
-    return reclaimed.changes === 1 ? { state: "claimed" } : { state: "pending" };
+    return reclaimed.changes === 1
+      ? { state: "claimed", claimedAt: input.at }
+      : { state: "pending" };
   });
   return tx.immediate();
+}
+
+export function releaseBriefRequest(
+  input: { localDate: string; claimedAt: string },
+  d: DatabaseT.Database = db,
+): boolean {
+  const released = d
+    .prepare(
+      `DELETE FROM brief_requests
+       WHERE local_date = ? AND state = 'pending' AND claimed_at = ?`,
+    )
+    .run(input.localDate, input.claimedAt);
+  return released.changes === 1;
 }
 
 export function completeBriefRequest(
   input: {
     localDate: string;
+    claimedAt: string;
     at: string;
     text?: string;
     reason?: string;
@@ -947,6 +963,9 @@ export function completeBriefRequest(
         message: row.message_id === null ? null : getMessage(row.message_id, d),
         ...(row.reason ? { reason: row.reason } : {}),
       };
+    }
+    if (row.claimed_at !== input.claimedAt) {
+      return { message: null, reason: "in_progress" };
     }
 
     let message: ChatMessage | null = null;

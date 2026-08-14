@@ -11,11 +11,13 @@ export function TodayScreen({
   openRecord,
   isAdmin,
   onBulkDelete,
+  babyName = "your baby",
 }: {
   records: RoutineRecord[];
   openRecord: (r: RoutineRecord) => void;
   isAdmin?: boolean;
   onBulkDelete?: (ids: number[]) => Promise<void>;
+  babyName?: string;
 }) {
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
@@ -244,7 +246,9 @@ export function TodayScreen({
           </button>
         </div>
       )}
-      {!records.length && <div className="empty">No records logged yet.</div>}
+      {!records.length && (
+        <div className="empty">No records logged for {babyName} yet.</div>
+      )}
       {selecting && (
         <div className="composer">
           <div

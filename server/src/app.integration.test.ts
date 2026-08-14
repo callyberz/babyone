@@ -61,6 +61,7 @@ const app = createApp({
   completeChatRequest: repository.completeChatRequest,
   claimBriefRequest: repository.claimBriefRequest,
   completeBriefRequest: repository.completeBriefRequest,
+  releaseBriefRequest: repository.releaseBriefRequest,
   now: () => new Date("2026-08-13T15:00:00.000Z"),
 });
 
@@ -629,5 +630,72 @@ describe("chat and brief routes", () => {
       message: { text: "One generated brief." },
     });
     expect(generateBriefText).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases a failed brief claim so the same date can retry immediately", async () => {
+    const yesterday = [
+      ["feed", "2026-08-12T12:00:00.000Z", "Feed 1", { volume_oz: 3 }],
+      ["sleep", "2026-08-12T14:00:00.000Z", "Nap", { mins: 45 }],
+      ["diaper", "2026-08-12T16:00:00.000Z", "Wet", { kind: "wet" }],
+    ] as const;
+    for (const [type, at, title, meta] of yesterday) {
+      repository.insertRecord({ type, at, title, detail: "", meta } as never);
+    }
+
+    generateBriefText.mockRejectedValueOnce(new Error("temporary failure"));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const failed = await request("/api/brief/today", {
+      method: "POST",
+      body: { localDate: "2026-08-13", tzOffsetMin: 240 },
+    });
+    errorSpy.mockRestore();
+    expect(failed.status).toBe(500);
+
+    generateBriefText.mockResolvedValueOnce("Recovered brief.");
+    const retried = await request("/api/brief/today", {
+      method: "POST",
+      body: { localDate: "2026-08-13", tzOffsetMin: 240 },
+    });
+    expect(retried.status).toBe(200);
+    expect(await retried.json()).toMatchObject({
+      message: { text: "Recovered brief." },
+    });
+    expect(generateBriefText).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects a stale brief worker after its claim is replaced", async () => {
+    const yesterday = [
+      ["feed", "2026-08-12T12:00:00.000Z", "Feed 1", { volume_oz: 3 }],
+      ["sleep", "2026-08-12T14:00:00.000Z", "Nap", { mins: 45 }],
+      ["diaper", "2026-08-12T16:00:00.000Z", "Wet", { kind: "wet" }],
+    ] as const;
+    for (const [type, at, title, meta] of yesterday) {
+      repository.insertRecord({ type, at, title, detail: "", meta } as never);
+    }
+
+    let release!: (value: string) => void;
+    generateBriefText.mockImplementationOnce(
+      () => new Promise<string>((resolve) => { release = resolve; }),
+    );
+    const staleRequest = request("/api/brief/today", {
+      method: "POST",
+      body: { localDate: "2026-08-13", tzOffsetMin: 240 },
+    });
+    await vi.waitFor(() => expect(generateBriefText).toHaveBeenCalledTimes(1));
+    db.prepare(
+      "UPDATE brief_requests SET claimed_at = ? WHERE local_date = ?",
+    ).run("2026-08-13T15:05:01.000Z", "2026-08-13");
+
+    release("Stale brief.");
+    const response = await staleRequest;
+    expect(response.status).toBe(409);
+    expect(response.headers.get("Retry-After")).toBe("1");
+    expect(await response.json()).toEqual({
+      message: null,
+      reason: "in_progress",
+    });
+    expect(
+      repository.listMessages().filter((message) => message.kind === "brief"),
+    ).toHaveLength(0);
   });
 });

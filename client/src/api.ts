@@ -14,6 +14,14 @@ export class UnauthenticatedError extends Error {
   }
 }
 
+export interface AuthSession {
+  id: string;
+  createdAt: string;
+  expiresAt: string;
+  userAgent: string;
+  current: boolean;
+}
+
 const json = async <T>(r: Response): Promise<T> => {
   if (r.status === 401) throw new UnauthenticatedError();
   if (!r.ok) {
@@ -141,6 +149,14 @@ export const api = {
   }) => post("/api/auth/signup", input).then((r) => json<{ user: User }>(r)),
   logout: () =>
     post("/api/auth/logout", {}).then((r) => json<{ ok: boolean }>(r)),
+  listSessions: () =>
+    req("/api/auth/sessions").then((r) =>
+      json<{ sessions: AuthSession[] }>(r),
+    ),
+  revokeSession: (id: string) =>
+    req(`/api/auth/sessions/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }).then((r) => json<{ ok: boolean; current: boolean }>(r)),
   createInvite: () =>
     post("/api/invites", {}).then((r) =>
       json<{ code: string; expiresAt: string; url: string }>(r),

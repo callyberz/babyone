@@ -3,6 +3,8 @@ import {
   fmtDuration,
   formatBabyAge,
   formatBabyWeight,
+  getBabyDisplayName,
+  getBabyInitial,
   recordChips,
 } from "./utils";
 
@@ -85,6 +87,13 @@ describe("recordChips", () => {
 });
 
 describe("baby profile formatting", () => {
+  it("uses a trimmed profile name and a neutral loading fallback", () => {
+    expect(getBabyDisplayName({ name: "  Riley  " })).toBe("Riley");
+    expect(getBabyInitial({ name: "  riley  " })).toBe("R");
+    expect(getBabyDisplayName(null)).toBe("your baby");
+    expect(getBabyInitial(null)).toBe("B");
+  });
+
   it("formats ages across newborn, week, month, and year ranges", () => {
     expect(formatBabyAge("2026-08-11", new Date(2026, 7, 11))).toBe("newborn");
     expect(formatBabyAge("2026-08-09", new Date(2026, 7, 11))).toBe("2 days");

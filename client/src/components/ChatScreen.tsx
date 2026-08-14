@@ -5,13 +5,13 @@ import { fmtAgo, fmtDay, fmtTime, formatTimezone } from "../utils";
 import { Icon } from "./icons";
 import { RecordIcon } from "./RecordIcon";
 
-const SUGGESTIONS = [
+const suggestionsFor = (babyName: string) => [
   "Bottle 3 oz",
   "Nursed 20 min both",
   "Wet diaper",
   "Nap 45 min",
   "Vitamin D drops",
-  "How much sleep today?",
+  `How much sleep has ${babyName} had today?`,
 ];
 
 type LocalChatMessage = ChatMessage & {
@@ -27,7 +27,13 @@ const newRequestId = (): string => {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 };
 
-export function ChatScreen({ records }: { records: RoutineRecord[] }) {
+export function ChatScreen({
+  records,
+  babyName = "your baby",
+}: {
+  records: RoutineRecord[];
+  babyName?: string;
+}) {
   const { data: messages = [] } = useMessages();
   const { data: briefData } = useBrief();
   const chatMutation = useChat();
@@ -238,9 +244,9 @@ export function ChatScreen({ records }: { records: RoutineRecord[] }) {
           <div
             className="msg bot"
             role="status"
-            aria-label="Clement is responding"
+            aria-label="babyone is responding"
           >
-            <div className="msg-avatar bot">c</div>
+            <div className="msg-avatar bot">b</div>
             <div className="msg-bubble">
               <div className="typing">
                 <span />
@@ -253,7 +259,7 @@ export function ChatScreen({ records }: { records: RoutineRecord[] }) {
       </div>
 
       <div className="suggest-row">
-        {SUGGESTIONS.map((s) => (
+        {suggestionsFor(babyName).map((s) => (
           <button key={s} className="suggest-chip" onClick={() => void send(s)}>
             {s}
           </button>
@@ -264,8 +270,8 @@ export function ChatScreen({ records }: { records: RoutineRecord[] }) {
         <div className="composer-inner">
           <textarea
             ref={taRef}
-            aria-label="Message Clement"
-            placeholder="Tell me what just happened — e.g. 'fed 3oz at 2pm' or 'nap for 45 min'"
+            aria-label={`Message about ${babyName}`}
+            placeholder={`Tell me what happened with ${babyName} — e.g. 'fed 3oz at 2pm' or 'nap for 45 min'`}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={onKeyDown}
@@ -310,7 +316,7 @@ function ChatBubble({
       data-at={m.at}
     >
       <div className={`msg-avatar ${m.from}`}>
-        {m.from === "bot" ? "c" : "M"}
+        {m.from === "bot" ? "b" : "M"}
       </div>
       <div>
         <div className="msg-bubble">{m.text}</div>

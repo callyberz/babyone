@@ -51,6 +51,25 @@ export function useLogout() {
   });
 }
 
+export const sessionsKey = ["auth-sessions"] as const;
+
+export function useSessions(enabled: boolean) {
+  return useQuery({
+    queryKey: sessionsKey,
+    queryFn: () => api.listSessions().then((response) => response.sessions),
+    enabled,
+    staleTime: 0,
+  });
+}
+
+export function useRevokeSession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.revokeSession,
+    onSuccess: () => qc.invalidateQueries({ queryKey: sessionsKey }),
+  });
+}
+
 export function useCreateInvite() {
   return useMutation({ mutationFn: api.createInvite });
 }

@@ -18,6 +18,7 @@ import {
   listMessages,
   listRecentChatMessages,
   listRecords,
+  releaseBriefRequest,
   setBaby,
   updateRecord,
 } from "./db.js";
@@ -66,6 +67,7 @@ const app = createApp({
   completeChatRequest,
   claimBriefRequest,
   completeBriefRequest,
+  releaseBriefRequest,
 });
 
 const port = Number(process.env.PORT ?? 8787);

@@ -6,6 +6,9 @@ import {
   findSession,
   deleteSession,
   cleanupExpiredSessions,
+  deleteSessionForUser,
+  listSessionsForUser,
+  sessionPublicId,
   SESSION_TTL_MS,
 } from "./sessions.js";
 
@@ -53,6 +56,41 @@ describe("sessions", () => {
     const sid = createSession(db, userId, "");
     deleteSession(db, sid);
     expect(findSession(db, sid)).toBeNull();
+  });
+
+  it("lists only active sessions for one user and supports scoped revocation", () => {
+    const current = createSession(db, userId, "Browser A");
+    const otherUserId = Number(
+      db
+        .prepare(
+          "INSERT INTO users (email, password_hash, display_name, created_at) VALUES (?, ?, ?, ?)",
+        )
+        .run("other@example.com", "x", "Other", new Date().toISOString())
+        .lastInsertRowid,
+    );
+    const other = createSession(db, otherUserId, "Browser B");
+    db.prepare(
+      "INSERT INTO sessions (id, user_id, created_at, expires_at, user_agent) VALUES (?, ?, ?, ?, ?)",
+    ).run(
+      "expired-session-id-that-is-long-enough",
+      userId,
+      new Date(0).toISOString(),
+      new Date(0).toISOString(),
+      "Old browser",
+    );
+
+    expect(listSessionsForUser(db, userId)).toEqual([
+      expect.objectContaining({
+        id: sessionPublicId(current),
+        userAgent: "Browser A",
+      }),
+    ]);
+    expect(deleteSessionForUser(db, sessionPublicId(other), userId)).toBe(false);
+    expect(findSession(db, other)).not.toBeNull();
+    expect(
+      deleteSessionForUser(db, sessionPublicId(current), userId),
+    ).toBe(true);
+    expect(findSession(db, current)).toBeNull();
   });
 
   it("cleanupExpiredSessions deletes only expired", () => {

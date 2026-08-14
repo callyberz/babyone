@@ -4,6 +4,7 @@ import {
   applyCoreSchema,
   claimBriefRequest,
   completeBriefRequest,
+  releaseBriefRequest,
 } from "./db.js";
 
 let database: Database.Database;
@@ -29,6 +30,7 @@ describe("durable brief claims", () => {
     const at = "2026-08-13T12:00:00.000Z";
     expect(claimBriefRequest({ localDate: "2026-08-13", at }, database)).toEqual({
       state: "claimed",
+      claimedAt: at,
     });
     expect(claimBriefRequest({ localDate: "2026-08-13", at }, database)).toEqual({
       state: "pending",
@@ -59,17 +61,19 @@ describe("durable brief claims", () => {
         },
         database,
       ),
-    ).toEqual({ state: "claimed" });
+    ).toEqual({ state: "claimed", claimedAt: "2026-08-13T12:05:01.000Z" });
   });
 
   it("finalizes one durable message and returns it to later callers", () => {
-    claimBriefRequest(
+    const claim = claimBriefRequest(
       { localDate: "2026-08-13", at: "2026-08-13T12:00:00.000Z" },
       database,
     );
+    if (claim.state !== "claimed") throw new Error("expected claim");
     const completed = completeBriefRequest(
       {
         localDate: "2026-08-13",
+        claimedAt: claim.claimedAt,
         at: "2026-08-13T12:00:01.000Z",
         text: "A calm brief.",
       },
@@ -87,5 +91,75 @@ describe("durable brief claims", () => {
         .prepare("SELECT COUNT(*) AS count FROM messages WHERE kind = 'brief'")
         .get(),
     ).toEqual({ count: 1 });
+  });
+
+  it("releases a failed claim for immediate retry", () => {
+    const first = claimBriefRequest(
+      { localDate: "2026-08-13", at: "2026-08-13T12:00:00.000Z" },
+      database,
+    );
+    if (first.state !== "claimed") throw new Error("expected claim");
+
+    expect(
+      releaseBriefRequest(
+        { localDate: "2026-08-13", claimedAt: first.claimedAt },
+        database,
+      ),
+    ).toBe(true);
+    expect(
+      claimBriefRequest(
+        { localDate: "2026-08-13", at: "2026-08-13T12:00:01.000Z" },
+        database,
+      ),
+    ).toEqual({
+      state: "claimed",
+      claimedAt: "2026-08-13T12:00:01.000Z",
+    });
+  });
+
+  it("does not release or complete a newer claimant's reservation", () => {
+    const first = claimBriefRequest(
+      { localDate: "2026-08-13", at: "2026-08-13T12:00:00.000Z" },
+      database,
+    );
+    if (first.state !== "claimed") throw new Error("expected first claim");
+    const second = claimBriefRequest(
+      {
+        localDate: "2026-08-13",
+        at: "2026-08-13T12:05:01.000Z",
+        staleAfterMs: 5 * 60_000,
+      },
+      database,
+    );
+    if (second.state !== "claimed") throw new Error("expected second claim");
+
+    expect(
+      releaseBriefRequest(
+        { localDate: "2026-08-13", claimedAt: first.claimedAt },
+        database,
+      ),
+    ).toBe(false);
+    expect(
+      completeBriefRequest(
+        {
+          localDate: "2026-08-13",
+          claimedAt: first.claimedAt,
+          at: "2026-08-13T12:05:02.000Z",
+          text: "Stale result",
+        },
+        database,
+      ),
+    ).toEqual({ message: null, reason: "in_progress" });
+    expect(
+      completeBriefRequest(
+        {
+          localDate: "2026-08-13",
+          claimedAt: second.claimedAt,
+          at: "2026-08-13T12:05:03.000Z",
+          text: "Current result",
+        },
+        database,
+      ).message?.text,
+    ).toBe("Current result");
   });
 });
