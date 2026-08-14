@@ -27,11 +27,13 @@ import { getLlmStatus, llmParse } from "./llm.js";
 import { bootstrapAuth, seedIfEmpty } from "./seed.js";
 import { cleanupExpiredInvites } from "./auth/invites.js";
 import { cleanupExpiredSessions } from "./auth/sessions.js";
+import { cleanupExpiredPasswordResets } from "./auth/passwordResets.js";
 
 if (process.env.BABYONE_SEED_DEMO === "1") seedIfEmpty();
 await bootstrapAuth();
 cleanupExpiredSessions(db);
 cleanupExpiredInvites(db);
+cleanupExpiredPasswordResets(db);
 
 const origin = process.env.BABYONE_ORIGIN ?? "http://localhost:5173";
 const staticRoot = process.env.STATIC_ROOT ?? "../client/dist";

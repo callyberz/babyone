@@ -22,6 +22,7 @@ import {
 import { useMe } from "./auth/useAuth";
 import { LoginPage } from "./auth/LoginPage";
 import { SignupPage } from "./auth/SignupPage";
+import { ResetPasswordPage } from "./auth/ResetPasswordPage";
 import { Splash } from "./auth/Splash";
 
 const titles: Record<View, { t: string; s: string }> = {
@@ -51,6 +52,9 @@ export function App() {
   if (me.isLoading) return <Splash />;
   if (!me.data) {
     if (window.location.pathname === "/signup") return <SignupPage />;
+    if (window.location.pathname === "/reset-password") {
+      return <ResetPasswordPage />;
+    }
     return <LoginPage />;
   }
   return <AuthenticatedApp user={me.data} />;

@@ -14,6 +14,13 @@ import type {
 } from "./types.js";
 import { validateBaby } from "./types.js";
 
+// Mirror the public contract at the persistence boundary without importing
+// newly-added runtime values from a potentially stale workspace build.
+const DB_MAX_RECORD_TIMESTAMP_LENGTH = 64;
+const DB_MAX_RECORD_TITLE_LENGTH = 200;
+const DB_MAX_RECORD_DETAIL_LENGTH = 4_000;
+const DB_MAX_JSON_LENGTH = 8_000;
+
 export function applyAuthSchema(d: DatabaseT.Database): void {
   d.exec(`
     CREATE TABLE IF NOT EXISTS users (
@@ -42,29 +49,46 @@ export function applyAuthSchema(d: DatabaseT.Database): void {
       consumed_by INTEGER REFERENCES users(id),
       consumed_at TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS password_resets (
+      code        TEXT PRIMARY KEY,
+      user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_by  INTEGER NOT NULL REFERENCES users(id),
+      created_at  TEXT NOT NULL,
+      expires_at  TEXT NOT NULL,
+      consumed_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_password_resets_user
+      ON password_resets(user_id, expires_at);
   `);
 
-  const userCols = d.prepare("PRAGMA table_info(users)").all() as {
-    name: string;
-  }[];
-  if (!userCols.some((column) => column.name === "role")) {
-    d.exec(
-      "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'caregiver'",
-    );
-    // The first account was the legacy environment-derived administrator.
-    d.prepare(
-      "UPDATE users SET role = 'administrator' WHERE id = (SELECT id FROM users ORDER BY id LIMIT 1)",
-    ).run();
-  }
+  // Keep each legacy column migration and its data backfill atomic. A process
+  // interruption between adding `role` and promoting the first account would
+  // otherwise permanently strand a household without an administrator.
+  const migrateLegacyColumns = d.transaction(() => {
+    const userCols = d.prepare("PRAGMA table_info(users)").all() as {
+      name: string;
+    }[];
+    if (!userCols.some((column) => column.name === "role")) {
+      d.exec(
+        "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'caregiver'",
+      );
+      // The first account was the legacy environment-derived administrator.
+      d.prepare(
+        "UPDATE users SET role = 'administrator' WHERE id = (SELECT id FROM users ORDER BY id LIMIT 1)",
+      ).run();
+    }
 
-  const cols = d.prepare("PRAGMA table_info(records)").all() as {
-    name: string;
-  }[];
-  if (!cols.some((c) => c.name === "user_id")) {
-    d.exec(
-      "ALTER TABLE records ADD COLUMN user_id INTEGER REFERENCES users(id)",
-    );
-  }
+    const recordCols = d.prepare("PRAGMA table_info(records)").all() as {
+      name: string;
+    }[];
+    if (!recordCols.some((column) => column.name === "user_id")) {
+      d.exec(
+        "ALTER TABLE records ADD COLUMN user_id INTEGER REFERENCES users(id)",
+      );
+    }
+  });
+  migrateLegacyColumns.immediate();
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -80,10 +104,14 @@ export function applyCoreSchema(d: DatabaseT.Database): void {
     CREATE TABLE IF NOT EXISTS records (
       id     INTEGER PRIMARY KEY AUTOINCREMENT,
       type   TEXT NOT NULL,
-      at     TEXT NOT NULL,
-      title  TEXT NOT NULL,
-      detail TEXT NOT NULL DEFAULT '',
-      meta   TEXT NOT NULL DEFAULT '{}'
+      at     TEXT NOT NULL CHECK (length(at) <= ${DB_MAX_RECORD_TIMESTAMP_LENGTH}),
+      title  TEXT NOT NULL CHECK (length(title) <= ${DB_MAX_RECORD_TITLE_LENGTH}),
+      detail TEXT NOT NULL DEFAULT '' CHECK (length(detail) <= ${DB_MAX_RECORD_DETAIL_LENGTH}),
+      meta   TEXT NOT NULL DEFAULT '{}' CHECK (
+        length(meta) <= ${DB_MAX_JSON_LENGTH}
+        AND json_valid(meta)
+        AND json_type(meta) = 'object'
+      )
     );
     CREATE INDEX IF NOT EXISTS idx_records_at ON records(at DESC);
 
@@ -92,7 +120,10 @@ export function applyCoreSchema(d: DatabaseT.Database): void {
       sender      TEXT NOT NULL CHECK (sender IN ('user','bot')),
       at          TEXT NOT NULL,
       text        TEXT NOT NULL,
-      record_ids  TEXT NOT NULL DEFAULT '[]',
+      record_ids  TEXT NOT NULL DEFAULT '[]' CHECK (
+        length(record_ids) <= ${DB_MAX_JSON_LENGTH}
+        AND json_valid(record_ids) AND json_type(record_ids) = 'array'
+      ),
       kind        TEXT NOT NULL DEFAULT 'chat'
     );
     CREATE INDEX IF NOT EXISTS idx_messages_at ON messages(at ASC);
@@ -110,7 +141,7 @@ export function applyCoreSchema(d: DatabaseT.Database): void {
       request_id      TEXT NOT NULL,
       text            TEXT NOT NULL,
       user_message_id INTEGER NOT NULL REFERENCES messages(id),
-      response_json   TEXT,
+      response_json   TEXT CHECK (response_json IS NULL OR json_valid(response_json)),
       created_at      TEXT NOT NULL,
       PRIMARY KEY (user_id, request_id)
     );
@@ -137,13 +168,81 @@ export function applyCoreSchema(d: DatabaseT.Database): void {
     FROM kv
     WHERE k = 'brief.lastDate' AND v GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]';
   `);
-  const messageColumns = d.prepare("PRAGMA table_info(messages)").all() as {
-    name: string;
-  }[];
-  if (!messageColumns.some((column) => column.name === "kind")) {
-    d.exec("ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'");
-  }
+  const migrateMessageColumns = d.transaction(() => {
+    const messageColumns = d.prepare("PRAGMA table_info(messages)").all() as {
+      name: string;
+    }[];
+    if (!messageColumns.some((column) => column.name === "kind")) {
+      d.exec(
+        "ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'",
+      );
+    }
+  });
+  migrateMessageColumns.immediate();
   d.exec(`
+    CREATE TRIGGER IF NOT EXISTS records_storage_insert_guard
+    BEFORE INSERT ON records
+    WHEN length(NEW.at) > ${DB_MAX_RECORD_TIMESTAMP_LENGTH}
+      OR length(NEW.title) > ${DB_MAX_RECORD_TITLE_LENGTH}
+      OR length(NEW.detail) > ${DB_MAX_RECORD_DETAIL_LENGTH}
+      OR length(NEW.meta) > ${DB_MAX_JSON_LENGTH}
+      OR json_valid(NEW.meta) = 0
+      OR CASE WHEN json_valid(NEW.meta) = 1
+        THEN json_type(NEW.meta) <> 'object' ELSE 0 END
+    BEGIN
+      SELECT RAISE(ABORT, 'invalid record storage');
+    END;
+    CREATE TRIGGER IF NOT EXISTS records_storage_update_guard
+    BEFORE UPDATE ON records
+    WHEN length(NEW.at) > ${DB_MAX_RECORD_TIMESTAMP_LENGTH}
+      OR length(NEW.title) > ${DB_MAX_RECORD_TITLE_LENGTH}
+      OR length(NEW.detail) > ${DB_MAX_RECORD_DETAIL_LENGTH}
+      OR length(NEW.meta) > ${DB_MAX_JSON_LENGTH}
+      OR json_valid(NEW.meta) = 0
+      OR CASE WHEN json_valid(NEW.meta) = 1
+        THEN json_type(NEW.meta) <> 'object' ELSE 0 END
+    BEGIN
+      SELECT RAISE(ABORT, 'invalid record storage');
+    END;
+    CREATE TRIGGER IF NOT EXISTS messages_storage_insert_guard
+    BEFORE INSERT ON messages
+    WHEN length(NEW.record_ids) > ${DB_MAX_JSON_LENGTH}
+      OR json_valid(NEW.record_ids) = 0
+      OR CASE WHEN json_valid(NEW.record_ids) = 1
+        THEN json_type(NEW.record_ids) <> 'array' ELSE 0 END
+    BEGIN
+      SELECT RAISE(ABORT, 'invalid message record ids');
+    END;
+    CREATE TRIGGER IF NOT EXISTS messages_storage_update_guard
+    BEFORE UPDATE ON messages
+    WHEN length(NEW.record_ids) > ${DB_MAX_JSON_LENGTH}
+      OR json_valid(NEW.record_ids) = 0
+      OR CASE WHEN json_valid(NEW.record_ids) = 1
+        THEN json_type(NEW.record_ids) <> 'array' ELSE 0 END
+    BEGIN
+      SELECT RAISE(ABORT, 'invalid message record ids');
+    END;
+    CREATE TRIGGER IF NOT EXISTS chat_requests_response_insert_guard
+    BEFORE INSERT ON chat_requests
+    WHEN NEW.response_json IS NOT NULL AND (
+      json_valid(NEW.response_json) = 0
+      OR CASE WHEN json_valid(NEW.response_json) = 1
+        THEN json_type(NEW.response_json) <> 'object' ELSE 0 END
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'invalid chat response');
+    END;
+    CREATE TRIGGER IF NOT EXISTS chat_requests_response_update_guard
+    BEFORE UPDATE OF response_json ON chat_requests
+    WHEN NEW.response_json IS NOT NULL AND (
+      json_valid(NEW.response_json) = 0
+      OR CASE WHEN json_valid(NEW.response_json) = 1
+        THEN json_type(NEW.response_json) <> 'object' ELSE 0 END
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'invalid chat response');
+    END;
+
     CREATE TABLE IF NOT EXISTS sync_changes (
       seq        INTEGER PRIMARY KEY AUTOINCREMENT,
       entity     TEXT NOT NULL CHECK (entity IN ('record','message')),
@@ -247,6 +346,39 @@ interface MessageRow {
   kind: MessageKind;
 }
 
+const isJsonObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+function decodeRecordMeta(value: unknown): RecordMeta {
+  if (typeof value !== "string") return {};
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return isJsonObject(parsed) ? parsed : {};
+  } catch {
+    // A single legacy or externally-corrupted metadata value should not make
+    // the entire timeline, sync feed, export, and daily brief unreadable.
+    return {};
+  }
+}
+
+function decodeRecordIds(value: unknown): number[] {
+  if (typeof value !== "string") return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return [
+      ...new Set(
+        parsed.slice(0, 500).filter(
+          (id): id is number =>
+            typeof id === "number" && Number.isSafeInteger(id) && id > 0,
+        ),
+      ),
+    ];
+  } catch {
+    return [];
+  }
+}
+
 const rowToRecord = (r: RecordRow): RoutineRecord => ({
   id: r.id,
   type: (KNOWN_RECORD_TYPES as readonly string[]).includes(r.type)
@@ -256,7 +388,12 @@ const rowToRecord = (r: RecordRow): RoutineRecord => ({
   title: r.title,
   detail: r.detail,
   meta: (() => {
-    const meta = JSON.parse(r.meta) as RecordMeta;
+    const meta = decodeRecordMeta(r.meta);
+    if (r.type === "other") {
+      return typeof meta.category === "string" && meta.category.length > 0
+        ? meta
+        : { ...meta, category: "other" };
+    }
     return (KNOWN_RECORD_TYPES as readonly string[]).includes(r.type)
       ? meta
       : { ...meta, category: r.type };
@@ -276,8 +413,8 @@ const rowToMessage = (r: MessageRow): ChatMessage => ({
   from: r.sender,
   at: r.at,
   text: r.text,
-  recordIds: JSON.parse(r.record_ids) as number[],
-  kind: r.kind,
+  recordIds: decodeRecordIds(r.record_ids),
+  kind: r.kind === "brief" ? "brief" : "chat",
 });
 
 export const listRecords = (d: DatabaseT.Database = db): RoutineRecord[] =>
@@ -466,6 +603,11 @@ export function getSyncDelta(
 ): HouseholdSync {
   const pageSize = Math.max(1, Math.min(500, Math.trunc(limit)));
   pruneSyncChanges(d);
+  const current = currentSyncCursor(d);
+  // A cursor can be persisted by a restored client while the server database
+  // has rolled back to an earlier backup. Returning empty deltas forever would
+  // strand that client on stale local data, so recover with a full snapshot.
+  if (after > current) return getSyncSnapshot(d);
   const oldest = d.prepare("SELECT MIN(seq) AS seq FROM sync_changes").get() as {
     seq: number | null;
   };

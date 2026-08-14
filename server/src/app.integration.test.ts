@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, type AppDependencies } from "./app.js";
-import { createSession } from "./auth/sessions.js";
+import { createSession, findSession } from "./auth/sessions.js";
+import { verifyPassword } from "./auth/passwords.js";
 
 const ORIGIN = "http://localhost:5173";
 const tempDir = mkdtempSync(join(tmpdir(), "babyone-app-test-"));
@@ -65,6 +66,7 @@ const app = createApp({
 
 beforeEach(() => {
   db.exec(`
+    DELETE FROM password_resets;
     DELETE FROM invites;
     DELETE FROM sessions;
     DELETE FROM chat_requests;
@@ -137,6 +139,28 @@ const recordDraft = {
 };
 
 describe("mounted application health and security", () => {
+  it("hardens responses and prevents API data from being cached", async () => {
+    const response = await request("/api/baby");
+
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("content-security-policy")).toContain(
+      "frame-ancestors 'none'",
+    );
+    expect(response.headers.get("permissions-policy")).toContain("camera=()");
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(response.headers.get("strict-transport-security")).toContain(
+      "max-age=",
+    );
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("x-frame-options")).toBe("DENY");
+
+    const unauthenticated = await request("/api/records", {
+      authenticated: false,
+    });
+    expect(unauthenticated.headers.get("cache-control")).toBe("no-store");
+    expect(unauthenticated.headers.get("x-frame-options")).toBe("DENY");
+  });
+
   it("reports database readiness without authentication", async () => {
     const healthy = await request("/api/health", { authenticated: false });
     expect(healthy.status).toBe(200);
@@ -355,6 +379,132 @@ describe("record routes", () => {
     });
     expect(deleteMissing.status).toBe(404);
     expect(await deleteMissing.json()).toEqual({ error: "not_found" });
+  });
+});
+
+describe("caregiver access recovery", () => {
+  it("lets only administrators list caregivers and issue one-time reset links", async () => {
+    const caregiverId = Number(
+      db
+        .prepare(
+          "INSERT INTO users (email, password_hash, display_name, role, created_at) VALUES (?, ?, ?, 'caregiver', ?)",
+        )
+        .run(
+          "maya@example.com",
+          "old-hash",
+          "Maya",
+          "2026-08-02T00:00:00.000Z",
+        ).lastInsertRowid,
+    );
+    const caregiverSid = createSession(db, caregiverId, "old-device");
+    const caregiverCookie = `bo_sid=${caregiverSid}`;
+
+    const forbiddenList = await request("/api/caregivers", {
+      sessionCookie: caregiverCookie,
+    });
+    expect(forbiddenList.status).toBe(403);
+    const forbiddenReset = await request(
+      `/api/caregivers/${authenticatedUserId}/password-reset`,
+      { method: "POST", body: {}, sessionCookie: caregiverCookie },
+    );
+    expect(forbiddenReset.status).toBe(403);
+
+    const list = await request("/api/caregivers");
+    expect(list.status).toBe(200);
+    const listText = await list.text();
+    expect(listText).not.toContain("old-hash");
+    expect(JSON.parse(listText)).toEqual({
+      caregivers: [
+        {
+          id: authenticatedUserId,
+          email: "admin@example.com",
+          displayName: "Admin",
+          isAdmin: true,
+        },
+        {
+          id: caregiverId,
+          email: "maya@example.com",
+          displayName: "Maya",
+          isAdmin: false,
+        },
+      ],
+    });
+
+    const issued = await request(
+      `/api/caregivers/${caregiverId}/password-reset`,
+      { method: "POST", body: {} },
+    );
+    expect(issued.status).toBe(200);
+    const issuedBody = (await issued.json()) as {
+      url: string;
+      expiresAt: string;
+    };
+    expect(issuedBody.url).toContain(`${ORIGIN}/reset-password?code=`);
+    const code = new URL(issuedBody.url).searchParams.get("code");
+    expect(code).toBeTruthy();
+
+    const completed = await request("/api/auth/reset-password", {
+      method: "POST",
+      authenticated: false,
+      body: { code, password: "new-password" },
+    });
+    expect(completed.status).toBe(200);
+    expect(await completed.json()).toEqual({
+      user: {
+        id: caregiverId,
+        email: "maya@example.com",
+        displayName: "Maya",
+        isAdmin: false,
+      },
+    });
+    expect(completed.headers.get("set-cookie")).toContain("bo_sid=");
+    expect(findSession(db, caregiverSid)).toBeNull();
+    const passwordRow = db
+      .prepare("SELECT password_hash FROM users WHERE id = ?")
+      .get(caregiverId) as { password_hash: string };
+    expect(await verifyPassword(passwordRow.password_hash, "new-password")).toBe(
+      true,
+    );
+
+    const replay = await request("/api/auth/reset-password", {
+      method: "POST",
+      authenticated: false,
+      body: { code, password: "another-password" },
+    });
+    expect(replay.status).toBe(400);
+    expect(await replay.json()).toEqual({ error: "invalid_reset" });
+  });
+
+  it("validates reset targets and reset-password bodies", async () => {
+    expect(
+      (
+        await request("/api/caregivers/not-an-id/password-reset", {
+          method: "POST",
+          body: {},
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await request("/api/caregivers/999/password-reset", {
+          method: "POST",
+          body: {},
+        })
+      ).status,
+    ).toBe(404);
+    const malformed = await request("/api/auth/reset-password", {
+      method: "POST",
+      authenticated: false,
+      body: [],
+    });
+    expect(malformed.status).toBe(400);
+    const weak = await request("/api/auth/reset-password", {
+      method: "POST",
+      authenticated: false,
+      body: { code: "not-a-real-token", password: "short" },
+    });
+    expect(weak.status).toBe(400);
+    expect(await weak.json()).toEqual({ error: "weak_password" });
   });
 });
 

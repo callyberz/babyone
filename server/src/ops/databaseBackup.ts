@@ -10,6 +10,7 @@ export const REQUIRED_TABLES = [
   "invites",
   "kv",
   "messages",
+  "password_resets",
   "records",
   "sessions",
   "sync_changes",

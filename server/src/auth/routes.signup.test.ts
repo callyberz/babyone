@@ -80,6 +80,15 @@ describe("POST /api/auth/signup", () => {
     expect(res.status).toBe(400);
   });
 
+  it.each([null, [], "signup", 42])(
+    "400s on a non-object JSON body (%j)",
+    async (body) => {
+      const res = await post("/api/auth/signup", body);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "bad_request" });
+    },
+  );
+
   it("400s on weak password", async () => {
     const inv = createInvite(db, adminId);
     const res = await post("/api/auth/signup", {

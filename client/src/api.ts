@@ -145,5 +145,15 @@ export const api = {
     post("/api/invites", {}).then((r) =>
       json<{ code: string; expiresAt: string; url: string }>(r),
     ),
+  listCaregivers: () =>
+    req("/api/caregivers").then((r) => json<{ caregivers: User[] }>(r)),
+  createPasswordReset: (userId: number) =>
+    post(`/api/caregivers/${userId}/password-reset`, {}).then((r) =>
+      json<{ expiresAt: string; url: string }>(r),
+    ),
+  resetPassword: (input: { code: string; password: string }) =>
+    post("/api/auth/reset-password", input).then((r) =>
+      json<{ user: User }>(r),
+    ),
   downloadExport: () => req("/api/export").then(downloadResponse),
 };

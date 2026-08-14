@@ -64,10 +64,10 @@ development with `BABYONE_SEED_DEMO=1`.
 `GET /api/health` reports the LLM as `healthy`, `degraded`, or `unavailable`,
 along with the active safe fallback mode.
 
-**Password recovery:** there is no self-service reset. To recover a forgotten
-password, an existing caregiver: (1) deletes the row from the `users` table
-(`DELETE FROM users WHERE email = ?`) — sessions cascade-delete — (2) generates
-a fresh invite for that caregiver to sign up again with the same email.
+**Password recovery:** an administrator can open **Manage caregiver access**
+and create a one-time reset link for any caregiver. Reset links expire after
+one hour; using one changes the password, signs out the caregiver's other
+devices, and preserves their existing record attribution.
 
 ## Deployment
 

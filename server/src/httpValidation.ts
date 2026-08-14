@@ -1,6 +1,7 @@
 export const MAX_CHAT_TEXT_LENGTH = 4_000;
 export const MAX_BULK_DELETE_IDS = 500;
 export const MAX_TIMEZONE_OFFSET_MIN = 14 * 60;
+export const MAX_INTEGER_TEXT_LENGTH = String(Number.MAX_SAFE_INTEGER).length;
 
 type ValidationResult<T> =
   | { ok: true; value: T }
@@ -102,7 +103,9 @@ export function validateBriefRequest(
 }
 
 export function parseRecordId(value: string): number | null {
-  if (!/^[1-9]\d*$/.test(value)) return null;
+  if (value.length > MAX_INTEGER_TEXT_LENGTH || !/^[1-9]\d*$/.test(value)) {
+    return null;
+  }
   const id = Number(value);
   return Number.isSafeInteger(id) ? id : null;
 }
@@ -111,7 +114,12 @@ export function parseSyncCursor(
   value: string | undefined,
 ): number | null | false {
   if (value === undefined) return null;
-  if (!/^(0|[1-9]\d*)$/.test(value)) return false;
+  if (
+    value.length > MAX_INTEGER_TEXT_LENGTH ||
+    !/^(0|[1-9]\d*)$/.test(value)
+  ) {
+    return false;
+  }
   const cursor = Number(value);
   return Number.isSafeInteger(cursor) ? cursor : false;
 }

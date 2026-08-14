@@ -133,6 +133,23 @@ export interface RecordToolOutcome {
 }
 
 const HAS_TZ_MARKER = /Z$|[+-]\d{2}:\d{2}$/;
+const MAX_QUERY_TIMESTAMP_LENGTH = 64;
+
+function normalizeQueryTimestamp(
+  value: unknown,
+): string | undefined | false {
+  if (value === undefined) return undefined;
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > MAX_QUERY_TIMESTAMP_LENGTH ||
+    !HAS_TZ_MARKER.test(value) ||
+    Number.isNaN(Date.parse(value))
+  ) {
+    return false;
+  }
+  return new Date(value).toISOString();
+}
 
 export function resolveLocalTimestamp(
   at: string | undefined,
@@ -264,9 +281,17 @@ export function handleFindRecords(input: FindRecordsInput): RecordToolResult {
       isError: true,
     };
   }
+  const since = normalizeQueryTimestamp(input.since);
+  const until = normalizeQueryTimestamp(input.until);
+  if (since === false || until === false) {
+    return {
+      result: "Since and until must be ISO-8601 timestamps with timezone offsets.",
+      isError: true,
+    };
+  }
   const rows = findRecords({
-    since: input.since,
-    until: input.until,
+    since,
+    until,
     type: type || undefined,
     limit,
   });

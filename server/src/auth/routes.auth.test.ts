@@ -189,6 +189,25 @@ describe("POST /api/auth/login", () => {
     const res = await post("/api/auth/login", { email: "alice@example.com" });
     expect(res.status).toBe(400);
   });
+
+  it.each([null, [], "credentials", 42])(
+    "400s on a non-object JSON body (%j)",
+    async (body) => {
+      const res = await post("/api/auth/login", body);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "bad_request" });
+    },
+  );
+
+  it("400s on malformed JSON instead of throwing", async () => {
+    const res = await app.request("/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{",
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "bad_request" });
+  });
 });
 
 describe("GET /api/auth/me", () => {

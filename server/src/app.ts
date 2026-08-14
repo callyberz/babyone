@@ -3,6 +3,7 @@ import type DatabaseT from "better-sqlite3";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { bodyLimit } from "hono/body-limit";
+import { secureHeaders } from "hono/secure-headers";
 import type {
   Baby,
   ChatMessage,
@@ -110,6 +111,28 @@ export interface AppDependencies {
 export function createApp(deps: AppDependencies): Hono<AuthEnv> {
   const app = new Hono<AuthEnv>();
   const now = deps.now ?? (() => new Date());
+
+  app.use(
+    "*",
+    secureHeaders({
+      contentSecurityPolicy: {
+        baseUri: ["'self'"],
+        frameAncestors: ["'none'"],
+        objectSrc: ["'none'"],
+      },
+      permissionsPolicy: {
+        camera: [],
+        geolocation: [],
+        microphone: [],
+      },
+      xFrameOptions: "DENY",
+    }),
+  );
+
+  app.use("/api/*", async (c, next) => {
+    await next();
+    c.header("Cache-Control", "no-store");
+  });
 
   app.use(
     "/api/*",

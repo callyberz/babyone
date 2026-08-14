@@ -3,6 +3,7 @@ import type { Baby, User } from "../types";
 import { Icon } from "./icons";
 import type { View } from "./views";
 import { InvitePanel } from "../auth/InvitePanel";
+import { CaregiverAccessPanel } from "../auth/CaregiverAccessPanel";
 import { useLogout } from "../auth/useAuth";
 import { api } from "../api";
 import { formatBabyAge, formatBabyWeight } from "../utils";
@@ -139,6 +140,7 @@ function CaregiverControls({
         Signed in as <strong>{user.displayName}</strong>
       </div>
       <InvitePanel />
+      {user.isAdmin && <CaregiverAccessPanel currentUserId={user.id} />}
       {user.isAdmin && (
         <div className="export-control">
           <button

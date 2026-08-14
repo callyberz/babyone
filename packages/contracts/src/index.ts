@@ -117,6 +117,13 @@ export interface HouseholdSync {
 
 export type UserRole = "administrator" | "caregiver";
 
+export const MAX_RECORD_TIMESTAMP_LENGTH = 64;
+export const MAX_RECORD_TITLE_LENGTH = 200;
+export const MAX_RECORD_DETAIL_LENGTH = 4_000;
+export const MAX_RECORD_META_JSON_LENGTH = 8_000;
+export const MAX_RECORD_META_STRING_LENGTH = 500;
+export const MAX_RECORD_QUANTITY = 1_000_000;
+
 export interface User {
   id: number;
   email: string;
@@ -216,9 +223,14 @@ function optionalNonNegativeNumber(
   const value = meta[key];
   if (
     value !== undefined &&
-    (typeof value !== "number" || !Number.isFinite(value) || value < 0)
+    (typeof value !== "number" ||
+      !Number.isFinite(value) ||
+      value < 0 ||
+      value > MAX_RECORD_QUANTITY)
   ) {
-    issues.push(`meta.${key} must be a non-negative number`);
+    issues.push(
+      `meta.${key} must be a non-negative number no greater than ${MAX_RECORD_QUANTITY}`,
+    );
   }
 }
 
@@ -231,9 +243,15 @@ function optionalString(
   const value = meta[key];
   if (
     value !== undefined &&
-    !(typeof value === "string" || (nullable && value === null))
+    !(
+      (typeof value === "string" &&
+        value.length <= MAX_RECORD_META_STRING_LENGTH) ||
+      (nullable && value === null)
+    )
   ) {
-    issues.push(`meta.${key} must be ${nullable ? "a string or null" : "a string"}`);
+    issues.push(
+      `meta.${key} must be ${nullable ? "a string or null" : "a string"} no longer than ${MAX_RECORD_META_STRING_LENGTH} characters`,
+    );
   }
 }
 
@@ -251,6 +269,7 @@ export function validateRecordDraft(
   if (
     typeof input.at !== "string" ||
     input.at.length === 0 ||
+    input.at.length > MAX_RECORD_TIMESTAMP_LENGTH ||
     !/(?:Z|[+-]\d{2}:\d{2})$/.test(input.at) ||
     Number.isNaN(Date.parse(input.at))
   ) {
@@ -263,11 +282,29 @@ export function validateRecordDraft(
   }
   if (typeof input.title !== "string" || input.title.trim().length === 0) {
     issues.push("title must be a non-empty string");
+  } else if (input.title.length > MAX_RECORD_TITLE_LENGTH) {
+    issues.push(`title must be ${MAX_RECORD_TITLE_LENGTH} characters or fewer`);
   }
   if (input.detail !== undefined && typeof input.detail !== "string") {
     issues.push("detail must be a string");
+  } else if (
+    typeof input.detail === "string" &&
+    input.detail.length > MAX_RECORD_DETAIL_LENGTH
+  ) {
+    issues.push(`detail must be ${MAX_RECORD_DETAIL_LENGTH} characters or fewer`);
   }
   if (!isObject(input.meta)) issues.push("meta must be an object");
+  if (isObject(input.meta)) {
+    try {
+      if (JSON.stringify(input.meta).length > MAX_RECORD_META_JSON_LENGTH) {
+        issues.push(
+          `meta must serialize to ${MAX_RECORD_META_JSON_LENGTH} characters or fewer`,
+        );
+      }
+    } catch {
+      issues.push("meta must be JSON-serializable");
+    }
+  }
 
   if (typeof type === "string" && TYPE_SET.has(type) && isObject(input.meta)) {
     const meta = input.meta;
@@ -304,9 +341,12 @@ export function validateRecordDraft(
       case "other":
         if (
           typeof meta.category !== "string" ||
-          meta.category.trim().length === 0
+          meta.category.trim().length === 0 ||
+          meta.category.length > MAX_RECORD_META_STRING_LENGTH
         ) {
-          issues.push("meta.category must be a non-empty string for other records");
+          issues.push(
+            `meta.category must be a non-empty string no longer than ${MAX_RECORD_META_STRING_LENGTH} characters for other records`,
+          );
         }
         break;
     }

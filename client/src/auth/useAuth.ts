@@ -25,7 +25,21 @@ export function useSignup() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: api.signup,
-    onSuccess: (r) => qc.setQueryData(meKey, r.user),
+    onSuccess: (r) => {
+      window.history.replaceState({}, "", "/");
+      qc.setQueryData(meKey, r.user);
+    },
+  });
+}
+
+export function useResetPassword() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.resetPassword,
+    onSuccess: (response) => {
+      window.history.replaceState({}, "", "/");
+      qc.setQueryData(meKey, response.user);
+    },
   });
 }
 
@@ -39,6 +53,21 @@ export function useLogout() {
 
 export function useCreateInvite() {
   return useMutation({ mutationFn: api.createInvite });
+}
+
+export const caregiversKey = ["caregivers"] as const;
+
+export function useCaregivers(enabled: boolean) {
+  return useQuery({
+    queryKey: caregiversKey,
+    queryFn: () => api.listCaregivers().then((response) => response.caregivers),
+    enabled,
+    staleTime: 0,
+  });
+}
+
+export function useCreatePasswordReset() {
+  return useMutation({ mutationFn: api.createPasswordReset });
 }
 
 export { UnauthenticatedError };

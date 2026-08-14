@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  MAX_RECORD_DETAIL_LENGTH,
+  MAX_RECORD_META_JSON_LENGTH,
+  MAX_RECORD_META_STRING_LENGTH,
+  MAX_RECORD_QUANTITY,
+  MAX_RECORD_TIMESTAMP_LENGTH,
+  MAX_RECORD_TITLE_LENGTH,
   RECORD_TYPES,
   validateBaby,
   validateRecordDraft,
@@ -92,6 +98,73 @@ describe("record contracts", () => {
         meta: { volume_oz: 3 },
       }),
     ).toMatchObject({ ok: false });
+  });
+
+  it("bounds persisted record strings and metadata", () => {
+    const base = {
+      type: "feed",
+      at: "2026-08-10T12:00:00.000Z",
+      title: "Bottle",
+      detail: "",
+      meta: {},
+    };
+
+    expect(
+      validateRecordDraft({
+        ...base,
+        title: "x".repeat(MAX_RECORD_TITLE_LENGTH + 1),
+      }).ok,
+    ).toBe(false);
+    expect(
+      validateRecordDraft({
+        ...base,
+        detail: "x".repeat(MAX_RECORD_DETAIL_LENGTH + 1),
+      }).ok,
+    ).toBe(false);
+    expect(
+      validateRecordDraft({
+        ...base,
+        at: `${"2".repeat(MAX_RECORD_TIMESTAMP_LENGTH)}Z`,
+      }).ok,
+    ).toBe(false);
+    expect(
+      validateRecordDraft({
+        ...base,
+        meta: { note: "x".repeat(MAX_RECORD_META_JSON_LENGTH) },
+      }).ok,
+    ).toBe(false);
+  });
+
+  it("rejects unsafe quantities and oversized typed metadata strings", () => {
+    expect(
+      validateRecordDraft({
+        type: "feed",
+        at: "2026-08-10T12:00:00.000Z",
+        title: "Bottle",
+        meta: { volume_oz: MAX_RECORD_QUANTITY + 1 },
+      }).ok,
+    ).toBe(false);
+    expect(
+      validateRecordDraft({
+        type: "other",
+        at: "2026-08-10T12:00:00.000Z",
+        title: "Note",
+        meta: { category: "x".repeat(MAX_RECORD_META_STRING_LENGTH + 1) },
+      }).ok,
+    ).toBe(false);
+  });
+
+  it("rejects metadata that cannot be serialized as JSON", () => {
+    const meta: Record<string, unknown> = {};
+    meta.self = meta;
+    expect(
+      validateRecordDraft({
+        type: "feed",
+        at: "2026-08-10T12:00:00.000Z",
+        title: "Bottle",
+        meta,
+      }).ok,
+    ).toBe(false);
   });
 });
 

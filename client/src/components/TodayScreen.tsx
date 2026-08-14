@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { RecordType, RoutineRecord, KnownRecordType } from "../types";
 import { categories, getCategory } from "../types";
 import { fmtDay, fmtTime, recordChips } from "../utils";
+import { Icon } from "./icons";
 
 type Filter = "all" | RecordType;
 
@@ -17,6 +18,7 @@ export function TodayScreen({
   onBulkDelete?: (ids: number[]) => Promise<void>;
 }) {
   const [filter, setFilter] = useState<Filter>("all");
+  const [query, setQuery] = useState("");
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [confirming, setConfirming] = useState(false);
@@ -54,7 +56,27 @@ export function TodayScreen({
       return next;
     });
 
-  const filtered = records.filter((r) => filter === "all" || r.type === filter);
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const filtered = records.filter((r) => {
+    if (filter !== "all" && r.type !== filter) return false;
+    if (!normalizedQuery) return true;
+
+    const metaValues = Object.values(r.meta ?? {}).filter(
+      (value): value is string | number | boolean =>
+        ["string", "number", "boolean"].includes(typeof value),
+    );
+    const searchable = [
+      r.title,
+      r.detail,
+      r.type,
+      getCategory(r.type).label,
+      ...recordChips(r).map((chip) => chip.text),
+      ...metaValues.map(String),
+    ]
+      .join(" ")
+      .toLocaleLowerCase();
+    return searchable.includes(normalizedQuery);
+  });
 
   const allSelected =
     filtered.length > 0 && filtered.every((r) => selected.has(r.id));
@@ -84,6 +106,34 @@ export function TodayScreen({
 
   return (
     <div className="content-pad">
+      <div className="timeline-search-row">
+        <div className="timeline-search">
+          <Icon.search aria-hidden="true" />
+          <label className="sr-only" htmlFor="timeline-search">
+            Search timeline
+          </label>
+          <input
+            id="timeline-search"
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search title, notes, medication…"
+          />
+          {query && (
+            <button
+              type="button"
+              className="timeline-search-clear"
+              aria-label="Clear search"
+              onClick={() => setQuery("")}
+            >
+              <Icon.close aria-hidden="true" />
+            </button>
+          )}
+        </div>
+        <div className="timeline-result-count" role="status" aria-live="polite">
+          {filtered.length} {filtered.length === 1 ? "record" : "records"}
+        </div>
+      </div>
       <div
         className="chart-tabs"
         style={{ flexWrap: "wrap", justifyContent: "space-between" }}
@@ -93,6 +143,8 @@ export function TodayScreen({
             <button
               key={k}
               className={`chart-tab ${filter === k ? "active" : ""}`}
+              type="button"
+              aria-pressed={filter === k}
               onClick={() => setFilter(k)}
             >
               {k !== "all" && (
@@ -121,19 +173,24 @@ export function TodayScreen({
                 <div className="tl-item" key={r.id}>
                   <div className="tl-dot" style={{ borderColor: cat.tint }} />
                   <div className="tl-time">{fmtTime(r.at)}</div>
-                  <div
+                  <button
+                    type="button"
                     className="tl-card"
-                    onClick={() =>
-                      selecting ? toggleSelected(r.id) : openRecord(r)
+                    aria-label={
+                      selecting
+                        ? `${selected.has(r.id) ? "Deselect" : "Select"} ${r.title} at ${fmtTime(r.at)}`
+                        : `Edit ${r.title} at ${fmtTime(r.at)}`
                     }
+                    aria-pressed={selecting ? selected.has(r.id) : undefined}
+                    onClick={() => (selecting ? toggleSelected(r.id) : openRecord(r))}
                   >
                     {selecting && (
-                      <input
-                        type="checkbox"
-                        checked={selected.has(r.id)}
-                        onChange={() => toggleSelected(r.id)}
-                        onClick={(e) => e.stopPropagation()}
-                      />
+                      <span
+                        className={`record-select-mark ${selected.has(r.id) ? "selected" : ""}`}
+                        aria-hidden="true"
+                      >
+                        {selected.has(r.id) ? "✓" : ""}
+                      </span>
                     )}
                     <div
                       className="tl-ico"
@@ -165,16 +222,29 @@ export function TodayScreen({
                       {r.detail && <div className="tl-detail">{r.detail}</div>}
                     </div>
                     <div className="tl-tag">{cat.label}</div>
-                  </div>
+                  </button>
                 </div>
               );
             })}
           </div>
         </div>
       ))}
-      {!filtered.length && (
-        <div className="empty">No records yet for this filter.</div>
+      {!filtered.length && records.length > 0 && (
+        <div className="empty timeline-empty">
+          <div>No records match your search and filter.</div>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              setQuery("");
+              setFilter("all");
+            }}
+          >
+            Clear filters
+          </button>
+        </div>
       )}
+      {!records.length && <div className="empty">No records logged yet.</div>}
       {selecting && (
         <div className="composer">
           <div

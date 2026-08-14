@@ -134,6 +134,29 @@ describe("in-process record tools", () => {
     expect(findRecords).not.toHaveBeenCalled();
   });
 
+  it("normalizes timestamp query bounds before SQLite text comparison", () => {
+    const result = handleFindRecords({
+      since: "2026-08-10T09:00:00-04:00",
+      until: "2026-08-10T10:00:00-04:00",
+    });
+    expect(result.isError).toBeFalsy();
+    expect(findRecords).toHaveBeenCalledWith(
+      expect.objectContaining({
+        since: "2026-08-10T13:00:00.000Z",
+        until: "2026-08-10T14:00:00.000Z",
+      }),
+    );
+  });
+
+  it.each([
+    { since: "2026-08-10T09:00:00" },
+    { until: "not-a-date" },
+    { since: 123 as unknown as string },
+  ])("rejects an invalid timestamp query bound: %j", (input) => {
+    expect(handleFindRecords(input).isError).toBe(true);
+    expect(findRecords).not.toHaveBeenCalled();
+  });
+
   it("returns adapter-ready text from the direct dispatcher", () => {
     const outcome = callRecordTool("find_records", {});
     expect(outcome.isError).toBe(false);

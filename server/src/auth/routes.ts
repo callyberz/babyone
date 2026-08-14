@@ -11,6 +11,11 @@ import {
 import { createInvite, consumeInvite, isInviteAvailable } from "./invites.js";
 import { LoginRateLimiter, type RateLimitDecision } from "./rateLimit.js";
 import { isAdmin, type AuthEnv } from "./middleware.js";
+import {
+  consumePasswordReset,
+  createPasswordReset,
+  isPasswordResetAvailable,
+} from "./passwordResets.js";
 
 const COOKIE = "bo_sid";
 
@@ -26,8 +31,19 @@ const EMAIL_MAX = 254;
 const PASSWORD_MAX = 256;
 const DISPLAY_NAME_MAX = 80;
 const INVITE_CODE_MAX = 128;
+const RESET_CODE_MAX = 128;
 const USER_AGENT_MAX = 512;
 const RATE_WINDOW_MS = 15 * 60_000;
+
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+async function readJsonObject(
+  c: Context<AuthEnv>,
+): Promise<Record<string, unknown> | null> {
+  const value: unknown = await c.req.json().catch(() => null);
+  return isObject(value) ? value : null;
+}
 
 export const loginIpRl = new LoginRateLimiter({
   maxAttempts: 30,
@@ -46,12 +62,23 @@ export const signupInviteRl = new LoginRateLimiter({
   windowMs: RATE_WINDOW_MS,
   caseInsensitive: false,
 });
+export const resetIpRl = new LoginRateLimiter({
+  maxAttempts: 20,
+  windowMs: RATE_WINDOW_MS,
+});
+export const resetCodeRl = new LoginRateLimiter({
+  maxAttempts: 10,
+  windowMs: RATE_WINDOW_MS,
+  caseInsensitive: false,
+});
 
 export function resetAuthRateLimiters(): void {
   loginIpRl.clear();
   loginAccountIpRl.clear();
   signupIpRl.clear();
   signupInviteRl.clear();
+  resetIpRl.clear();
+  resetCodeRl.clear();
 }
 
 function asBoundedString(
@@ -101,10 +128,8 @@ export function mountAuthRoutes(
   db: DatabaseT.Database,
 ): void {
   app.post("/api/auth/login", async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as Record<
-      string,
-      unknown
-    >;
+    const body = await readJsonObject(c);
+    if (!body) return c.json({ error: "bad_request" }, 400);
     const email = asBoundedString(body.email, EMAIL_MAX, true)?.toLowerCase();
     const password = asBoundedString(body.password, PASSWORD_MAX);
     const agent = userAgent(c);
@@ -157,10 +182,8 @@ export function mountAuthRoutes(
   });
 
   app.post("/api/auth/signup", async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as Record<
-      string,
-      unknown
-    >;
+    const body = await readJsonObject(c);
+    if (!body) return c.json({ error: "bad_request" }, 400);
     const code = asBoundedString(body.code, INVITE_CODE_MAX, true);
     const email = asBoundedString(body.email, EMAIL_MAX, true)?.toLowerCase();
     const password = asBoundedString(body.password, PASSWORD_MAX);
@@ -233,6 +256,72 @@ export function mountAuthRoutes(
     }
   });
 
+  app.post("/api/auth/reset-password", async (c) => {
+    const body = await readJsonObject(c);
+    if (!body) return c.json({ error: "bad_request" }, 400);
+    const code = asBoundedString(body.code, RESET_CODE_MAX, true);
+    const password = asBoundedString(body.password, PASSWORD_MAX);
+    const agent = userAgent(c);
+    if (!code || !password || agent === null) {
+      return c.json({ error: "bad_request" }, 400);
+    }
+    if (password.length < 8) {
+      return c.json({ error: "weak_password" }, 400);
+    }
+
+    const ip = clientIp(c);
+    const resetLimit = rateLimited(c, [
+      resetIpRl.checkDetailed(ip),
+      resetCodeRl.checkDetailed(code),
+    ]);
+    if (resetLimit) return resetLimit;
+    if (!isPasswordResetAvailable(db, code)) {
+      return c.json({ error: "invalid_reset" }, 400);
+    }
+
+    const passwordHash = await hashPassword(password);
+    const resetAt = new Date();
+    const tx = db.transaction(() => {
+      const userId = consumePasswordReset(db, code, resetAt);
+      if (userId === null) throw new Error("invalid_reset");
+      db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(
+        passwordHash,
+        userId,
+      );
+      db.prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);
+      return db
+        .prepare("SELECT id, email, display_name, role FROM users WHERE id = ?")
+        .get(userId) as {
+        id: number;
+        email: string;
+        display_name: string;
+        role: "administrator" | "caregiver";
+      };
+    });
+
+    let user: ReturnType<typeof tx>;
+    try {
+      user = tx.immediate();
+    } catch (error) {
+      if (error instanceof Error && error.message === "invalid_reset") {
+        return c.json({ error: "invalid_reset" }, 400);
+      }
+      throw error;
+    }
+    resetIpRl.reset(ip);
+    resetCodeRl.reset(code);
+    const sid = createSession(db, user.id, agent);
+    setCookie(c, COOKIE, sid, cookieOpts(SESSION_TTL_MS));
+    return c.json({
+      user: {
+        id: user.id,
+        email: user.email,
+        displayName: user.display_name,
+        isAdmin: isAdmin(user),
+      },
+    });
+  });
+
   app.post("/api/auth/logout", (c) => {
     const sid = getCookie(c, COOKIE);
     if (sid) deleteSession(db, sid);
@@ -269,6 +358,50 @@ export function mountInviteRoutes(
       code: inv.code,
       expiresAt: inv.expiresAt,
       url: `${origin}/signup?code=${inv.code}`,
+    });
+  });
+
+  app.get("/api/caregivers", (c) => {
+    if (!isAdmin(c.get("user"))) return c.json({ error: "forbidden" }, 403);
+    const caregivers = (
+      db
+        .prepare(
+          "SELECT id, email, display_name, role FROM users ORDER BY display_name COLLATE NOCASE, id",
+        )
+        .all() as Array<{
+        id: number;
+        email: string;
+        display_name: string;
+        role: "administrator" | "caregiver";
+      }>
+    ).map((user) => ({
+      id: user.id,
+      email: user.email,
+      displayName: user.display_name,
+      isAdmin: isAdmin(user),
+    }));
+    return c.json({ caregivers });
+  });
+
+  app.post("/api/caregivers/:id/password-reset", (c) => {
+    const sessionUser = c.get("user");
+    if (!isAdmin(sessionUser)) return c.json({ error: "forbidden" }, 403);
+    const rawId = c.req.param("id");
+    if (!/^[1-9]\d*$/.test(rawId)) {
+      return c.json({ error: "bad_request" }, 400);
+    }
+    const userId = Number(rawId);
+    if (!Number.isSafeInteger(userId)) {
+      return c.json({ error: "bad_request" }, 400);
+    }
+    const target = db.prepare("SELECT 1 FROM users WHERE id = ?").get(userId);
+    if (!target) return c.json({ error: "not_found" }, 404);
+
+    const reset = createPasswordReset(db, userId, sessionUser.id);
+    const origin = process.env.BABYONE_ORIGIN ?? "";
+    return c.json({
+      expiresAt: reset.expiresAt,
+      url: `${origin}/reset-password?code=${reset.code}`,
     });
   });
 }

@@ -94,4 +94,15 @@ describe("household sync change feed", () => {
       messages: [],
     });
   });
+
+  it("falls back to a full snapshot when a restored server is behind the client cursor", () => {
+    const id = insertRecord("Restored current state");
+    const current = getSyncSnapshot(database).cursor;
+
+    expect(getSyncDelta(current + 10_000, 10, database)).toMatchObject({
+      full: true,
+      cursor: current,
+      records: [{ id, title: "Restored current state" }],
+    });
+  });
 });
