@@ -51,6 +51,17 @@ export function useLogout() {
   });
 }
 
+export function useUpdateProfile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.updateProfile,
+    onSuccess: (response) => {
+      qc.setQueryData(meKey, response.user);
+      void qc.invalidateQueries({ queryKey: caregiversKey });
+    },
+  });
+}
+
 export const sessionsKey = ["auth-sessions"] as const;
 
 export function useSessions(enabled: boolean) {

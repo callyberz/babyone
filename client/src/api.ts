@@ -149,6 +149,12 @@ export const api = {
   }) => post("/api/auth/signup", input).then((r) => json<{ user: User }>(r)),
   logout: () =>
     post("/api/auth/logout", {}).then((r) => json<{ ok: boolean }>(r)),
+  updateProfile: (displayName: string) =>
+    req("/api/auth/profile", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ displayName }),
+    }).then((r) => json<{ user: User }>(r)),
   listSessions: () =>
     req("/api/auth/sessions").then((r) =>
       json<{ sessions: AuthSession[] }>(r),

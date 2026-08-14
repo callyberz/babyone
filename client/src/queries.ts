@@ -91,8 +91,15 @@ export function useHouseholdSync() {
   });
 
   useEffect(() => {
-    if (query.data) applyHouseholdSync(qc, query.data);
-  }, [qc, query.data]);
+    if (!query.data) return;
+    applyHouseholdSync(qc, query.data);
+
+    // A delta is capped server-side. Drain a backlog immediately so a busy
+    // household cannot stay perpetually behind by only advancing one page on
+    // each polling interval. React Query deduplicates an already-active fetch;
+    // a failed continuation falls back to the normal retry/polling behavior.
+    if (query.data.hasMore) void query.refetch();
+  }, [qc, query.data, query.refetch]);
 
   return query;
 }

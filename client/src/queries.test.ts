@@ -1,11 +1,19 @@
-import { QueryClient } from "@tanstack/react-query";
-import { describe, expect, it } from "vitest";
+import { createElement, type ReactNode } from "react";
+import { renderHook, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatMessage, HouseholdSync, RoutineRecord } from "./types";
+import { api } from "./api";
+import { meKey } from "./auth/useAuth";
 import {
   applyHouseholdSync,
   messagesKey,
   recordsKey,
+  syncKey,
+  useHouseholdSync,
 } from "./queries";
+
+afterEach(() => vi.restoreAllMocks());
 
 const record = (id: number, title: string): RoutineRecord => ({
   id,
@@ -90,5 +98,51 @@ describe("applyHouseholdSync", () => {
       [1, "updated"],
       [3, "new"],
     ]);
+  });
+});
+
+describe("useHouseholdSync", () => {
+  it("immediately drains every available page in cursor order", async () => {
+    const firstPage = payload({
+      cursor: 500,
+      hasMore: true,
+      records: [record(1, "first page")],
+    });
+    const middlePage = payload({
+      cursor: 560,
+      hasMore: true,
+      records: [record(2, "middle page")],
+    });
+    const finalPage = payload({
+      cursor: 620,
+      records: [record(3, "final page")],
+    });
+    const sync = vi
+      .spyOn(api, "sync")
+      .mockResolvedValueOnce(firstPage)
+      .mockResolvedValueOnce(middlePage)
+      .mockResolvedValueOnce(finalPage);
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    qc.setQueryData(meKey, {
+      id: 1,
+      email: "caregiver@example.com",
+      displayName: "Caregiver",
+      isAdmin: false,
+    });
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client: qc }, children);
+
+    renderHook(() => useHouseholdSync(), { wrapper });
+
+    await waitFor(() => expect(sync).toHaveBeenCalledTimes(3));
+    expect(sync.mock.calls).toEqual([[undefined], [500], [560]]);
+    await waitFor(() =>
+      expect(qc.getQueryData<HouseholdSync>(syncKey)?.cursor).toBe(620),
+    );
+    expect(
+      qc.getQueryData<RoutineRecord[]>(recordsKey)?.map((item) => item.id),
+    ).toEqual([3, 2, 1]);
   });
 });

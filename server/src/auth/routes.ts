@@ -353,6 +353,31 @@ export function mountInviteRoutes(
   app: Hono<AuthEnv>,
   db: DatabaseT.Database,
 ): void {
+  app.put("/api/auth/profile", async (c) => {
+    const body = await readJsonObject(c);
+    if (!body) return c.json({ error: "bad_request" }, 400);
+    const displayName = asBoundedString(
+      body.displayName,
+      DISPLAY_NAME_MAX,
+      true,
+    );
+    if (!displayName) return c.json({ error: "bad_request" }, 400);
+
+    const sessionUser = c.get("user");
+    db.prepare("UPDATE users SET display_name = ? WHERE id = ?").run(
+      displayName,
+      sessionUser.id,
+    );
+    return c.json({
+      user: {
+        id: sessionUser.id,
+        email: sessionUser.email,
+        displayName,
+        isAdmin: isAdmin(sessionUser),
+      },
+    });
+  });
+
   app.get("/api/auth/sessions", (c) => {
     const user = c.get("user");
     const currentId = getCookie(c, COOKIE);

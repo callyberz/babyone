@@ -5,6 +5,7 @@ import type { View } from "./views";
 import { InvitePanel } from "../auth/InvitePanel";
 import { CaregiverAccessPanel } from "../auth/CaregiverAccessPanel";
 import { SessionPanel } from "../auth/SessionPanel";
+import { ProfilePanel } from "../auth/ProfilePanel";
 import { useLogout } from "../auth/useAuth";
 import { api } from "../api";
 import {
@@ -159,6 +160,7 @@ function CaregiverControls({
       <div className="me-card">
         Signed in as <strong>{user.displayName}</strong>
       </div>
+      <ProfilePanel user={user} />
       <InvitePanel />
       <SessionPanel />
       {user.isAdmin && <CaregiverAccessPanel currentUserId={user.id} />}

@@ -94,10 +94,35 @@ export function applyAuthSchema(d: DatabaseT.Database): void {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dbPath = process.env.BABYONE_DB ?? path.resolve(__dirname, "../data.db");
 
+export const SQLITE_BUSY_TIMEOUT_MS = 5_000;
+
+/** Apply the durability and contention settings required by every connection. */
+export function configureDatabase(d: DatabaseT.Database): void {
+  // Set this before any pragma that may need a lock, so concurrent startup or
+  // maintenance gets the same bounded retry behavior as later queries.
+  d.pragma(`busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`);
+  d.pragma("journal_mode = WAL");
+  d.pragma("foreign_keys = ON");
+}
+
 export const db = new Database(dbPath);
-db.pragma("journal_mode = WAL");
-db.pragma("foreign_keys = ON");
-db.pragma("busy_timeout = 5000");
+configureDatabase(db);
+
+/**
+ * Flush committed WAL pages before closing the process-owned connection.
+ * Closing remains guaranteed if checkpointing itself fails, and repeated
+ * shutdown signals are harmless once the connection has been closed.
+ */
+export function checkpointAndCloseDatabase(
+  d: DatabaseT.Database = db,
+): void {
+  if (!d.open) return;
+  try {
+    d.pragma("wal_checkpoint(TRUNCATE)");
+  } finally {
+    d.close();
+  }
+}
 
 export function applyCoreSchema(d: DatabaseT.Database): void {
   d.exec(`

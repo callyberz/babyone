@@ -57,6 +57,10 @@ Every caregiver can review their active signed-in devices from the sidebar and
 revoke an old phone or browser. The management API exposes only irreversible
 session fingerprints, never reusable session cookies.
 
+Caregivers can also update their own display name from the sidebar. The Trends
+workspace supports accessible 7-, 14-, and 30-day summaries with exact daily
+values alongside the visual charts.
+
 Caregiver timelines update incrementally in the background, so long household
 histories are not downloaded again on every refresh. Administrators can also
 download a versioned, secret-free JSON household archive from the sidebar.
