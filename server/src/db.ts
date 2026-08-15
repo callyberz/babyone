@@ -20,6 +20,7 @@ const DB_MAX_RECORD_TIMESTAMP_LENGTH = 64;
 const DB_MAX_RECORD_TITLE_LENGTH = 200;
 const DB_MAX_RECORD_DETAIL_LENGTH = 4_000;
 const DB_MAX_JSON_LENGTH = 8_000;
+const DB_MAX_IDEMPOTENCY_JSON_LENGTH = 64 * 1024;
 
 export function applyAuthSchema(d: DatabaseT.Database): void {
   d.exec(`
@@ -172,6 +173,23 @@ export function applyCoreSchema(d: DatabaseT.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_chat_requests_created
       ON chat_requests(created_at);
+
+    CREATE TABLE IF NOT EXISTS record_requests (
+      user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      request_id    TEXT NOT NULL CHECK (length(request_id) BETWEEN 8 AND 128),
+      payload_json  TEXT NOT NULL CHECK (
+        length(payload_json) <= ${DB_MAX_IDEMPOTENCY_JSON_LENGTH}
+        AND json_valid(payload_json) AND json_type(payload_json) = 'object'
+      ),
+      response_json TEXT NOT NULL CHECK (
+        length(response_json) <= ${DB_MAX_IDEMPOTENCY_JSON_LENGTH}
+        AND json_valid(response_json) AND json_type(response_json) = 'object'
+      ),
+      created_at    TEXT NOT NULL,
+      PRIMARY KEY (user_id, request_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_record_requests_created
+      ON record_requests(created_at);
 
     CREATE TABLE IF NOT EXISTS brief_requests (
       local_date  TEXT PRIMARY KEY,
@@ -504,16 +522,20 @@ export const findDuplicateRecord = (opts: {
   return null;
 };
 
-export const getRecord = (id: number): RoutineRecord | null => {
-  const row = db.prepare(`${BASE_SELECT} WHERE r.id = ?`).get(id) as
+export const getRecord = (
+  id: number,
+  d: DatabaseT.Database = db,
+): RoutineRecord | null => {
+  const row = d.prepare(`${BASE_SELECT} WHERE r.id = ?`).get(id) as
     RecordRow | undefined;
   return row ? rowToRecord(row) : null;
 };
 
-export const insertRecord = (
+const insertRecordWithDatabase = (
   r: Omit<RoutineRecord, "id"> & { userId?: number | null },
+  d: DatabaseT.Database,
 ): RoutineRecord => {
-  const info = db
+  const info = d
     .prepare(
       "INSERT INTO records (type, at, title, detail, meta, user_id) VALUES (?, ?, ?, ?, ?, ?)",
     )
@@ -527,8 +549,105 @@ export const insertRecord = (
     );
   // Re-read through the JOIN so the return value has `user` populated and no
   // stray DB-layer `userId` leaked from the input spread.
-  return getRecord(Number(info.lastInsertRowid))!;
+  return getRecord(Number(info.lastInsertRowid), d)!;
 };
+
+export const insertRecord = (
+  r: Omit<RoutineRecord, "id"> & { userId?: number | null },
+): RoutineRecord => insertRecordWithDatabase(r, db);
+
+export type RecordRequestResult =
+  | { state: "created" | "completed"; record: RoutineRecord }
+  | { state: "gone" }
+  | { state: "conflict" };
+
+interface RecordRequestRow {
+  payload_json: string;
+  response_json: string;
+}
+
+/**
+ * Produce a stable representation of JSON data so semantically identical
+ * metadata does not conflict merely because its object keys arrived in a
+ * different order.
+ */
+function canonicalizeJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalizeJson);
+  if (!isJsonObject(value)) return value;
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map((key) => [key, canonicalizeJson(value[key])]),
+  );
+}
+
+/**
+ * Atomically create a record and its durable replay receipt. An IMMEDIATE
+ * transaction ensures another connection retrying the same request waits for
+ * this commit, then observes either the completed response or a payload
+ * conflict; there is no externally visible pending state.
+ */
+export function createRecordIdempotently(
+  input: {
+    userId: number;
+    requestId: string;
+    record: Omit<RoutineRecord, "id" | "user">;
+    createdAt: string;
+  },
+  d: DatabaseT.Database = db,
+): RecordRequestResult {
+  const payloadJson = JSON.stringify(
+    canonicalizeJson({
+      type: input.record.type,
+      at: input.record.at,
+      title: input.record.title,
+      detail: input.record.detail ?? "",
+      meta: input.record.meta ?? {},
+    }),
+  );
+  const tx = d.transaction((): RecordRequestResult => {
+    const existing = d
+      .prepare(
+        "SELECT payload_json, response_json FROM record_requests WHERE user_id = ? AND request_id = ?",
+      )
+      .get(input.userId, input.requestId) as RecordRequestRow | undefined;
+    if (existing) {
+      if (existing.payload_json !== payloadJson) return { state: "conflict" };
+      const priorResponse = JSON.parse(existing.response_json) as {
+        id?: unknown;
+      };
+      if (
+        typeof priorResponse.id !== "number" ||
+        !Number.isSafeInteger(priorResponse.id) ||
+        priorResponse.id <= 0
+      ) {
+        throw new Error("record request response is invalid");
+      }
+      const currentRecord = getRecord(priorResponse.id, d);
+      if (!currentRecord) return { state: "gone" };
+      return {
+        state: "completed",
+        record: currentRecord,
+      };
+    }
+
+    const record = insertRecordWithDatabase(
+      { ...input.record, userId: input.userId },
+      d,
+    );
+    d.prepare(
+      "INSERT INTO record_requests (user_id, request_id, payload_json, response_json, created_at) VALUES (?, ?, ?, ?, ?)",
+    ).run(
+      input.userId,
+      input.requestId,
+      payloadJson,
+      JSON.stringify(record),
+      input.createdAt,
+    );
+    return { state: "created", record };
+  });
+  return tx.immediate();
+}
 
 export const updateRecord = (r: RoutineRecord): RoutineRecord => {
   db.prepare(

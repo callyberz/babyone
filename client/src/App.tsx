@@ -4,6 +4,7 @@ import { BabyProfileModal } from "./components/BabyProfileModal";
 import { CalendarScreen } from "./components/CalendarScreen";
 import { ChatScreen } from "./components/ChatScreen";
 import { DashScreen } from "./components/DashScreen";
+import { HouseholdSyncStatus } from "./components/HouseholdSyncStatus";
 import { Icon } from "./components/icons";
 import { RecordModal } from "./components/RecordModal";
 import { MobileAccountMenu, Sidebar, TabBar } from "./components/Sidebar";
@@ -81,7 +82,7 @@ function AuthenticatedApp({ user }: { user: User }) {
   const records = recordsQuery.data ?? [];
   const baby = babyQuery.data ?? null;
   const babyName = getBabyDisplayName(baby);
-  const loadError = syncQuery.error ?? recordsQuery.error ?? babyQuery.error;
+  const loadError = recordsQuery.error ?? babyQuery.error;
   const loadErr = loadError instanceof Error ? loadError.message : null;
 
   useEffect(() => {
@@ -128,6 +129,14 @@ function AuthenticatedApp({ user }: { user: User }) {
             <div className="topbar-sub">
               {loadErr ? `Server offline: ${loadErr}` : titles[view].s}
             </div>
+            <HouseholdSyncStatus
+              hasSynced={syncQuery.data !== undefined}
+              isFetching={syncQuery.isFetching}
+              isError={syncQuery.isError}
+              error={syncQuery.error}
+              updatedAt={syncQuery.dataUpdatedAt}
+              onRetry={syncQuery.refetch}
+            />
           </div>
           <div className="topbar-actions">
             {view !== "chat" && (

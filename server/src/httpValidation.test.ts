@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_BULK_DELETE_IDS,
   MAX_CHAT_TEXT_LENGTH,
+  parseOptionalRequestId,
   parseRecordId,
   parseSyncCursor,
   validateBriefRequest,
@@ -48,6 +49,26 @@ describe("validateChatRequest", () => {
     { text: "hello", requestId: "x".repeat(129) },
   ])("rejects an invalid chat body: %j", (body) => {
     expect(validateChatRequest(body)).toEqual({ ok: false });
+  });
+});
+
+describe("parseOptionalRequestId", () => {
+  it("accepts an omitted or valid request id", () => {
+    expect(parseOptionalRequestId({ type: "feed" })).toBeNull();
+    expect(
+      parseOptionalRequestId({ requestId: "record-request-123" }),
+    ).toBe("record-request-123");
+  });
+
+  it.each([
+    null,
+    [],
+    { requestId: null },
+    { requestId: "short" },
+    { requestId: "contains spaces" },
+    { requestId: "x".repeat(129) },
+  ])("rejects an invalid request id container or value: %j", (input) => {
+    expect(parseOptionalRequestId(input)).toBe(false);
   });
 });
 

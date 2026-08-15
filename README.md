@@ -61,6 +61,11 @@ Caregivers can also update their own display name from the sidebar. The Trends
 workspace supports accessible 7-, 14-, and 30-day summaries with exact daily
 values alongside the visual charts.
 
+Quick Log covers feeds, sleep, diapers, tummy time, medication, and mood, with
+an immediate Undo action. New routine writes carry durable request IDs so an
+ambiguous network retry cannot create a duplicate. The header reports household
+sync freshness and offers a retry when the app is offline or disconnected.
+
 Caregiver timelines update incrementally in the background, so long household
 histories are not downloaded again on every refresh. Administrators can also
 download a versioned, secret-free JSON household archive from the sidebar.

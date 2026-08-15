@@ -6,12 +6,12 @@ import {
   type QueryClient,
 } from "@tanstack/react-query";
 import { api } from "./api";
+import type { CreateRecordInput } from "./api";
 import type {
   Baby,
   ChatMessage,
   HouseholdSync,
   RoutineRecord,
-  RoutineRecordDraft,
 } from "@babyone/contracts";
 import { useMe } from "./auth/useAuth";
 
@@ -115,7 +115,7 @@ export function useUpdateBaby() {
 export function useCreateRecord() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (record: RoutineRecordDraft) => api.createRecord(record),
+    mutationFn: (input: CreateRecordInput) => api.createRecord(input),
     onSuccess: (created) => {
       qc.setQueryData<RoutineRecord[]>(recordsKey, (records) =>
         sortRecords([

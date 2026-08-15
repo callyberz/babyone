@@ -68,7 +68,24 @@ describe("database backup operations", () => {
 
     const report = verifyRestoreCandidate(backup);
     expect(report.integrity).toBe("ok");
-    expect(report.tables).toEqual(expect.arrayContaining(["records", "users", "kv"]));
+    expect(report.tables).toEqual(
+      expect.arrayContaining(["records", "record_requests", "users", "kv"]),
+    );
+    expect(report.counts.records).toBe(1);
+  });
+
+  it("accepts a valid pre-idempotency backup for migration on restore", async () => {
+    const dir = workspace();
+    const source = join(dir, "legacy-source.db");
+    const backup = join(dir, "legacy-snapshot.db");
+    const live = createSource(source);
+    live.exec("DROP TABLE record_requests");
+    await createOnlineBackup(source, backup);
+    live.close();
+
+    const report = verifyRestoreCandidate(backup);
+    expect(report.integrity).toBe("ok");
+    expect(report.tables).not.toContain("record_requests");
     expect(report.counts.records).toBe(1);
   });
 

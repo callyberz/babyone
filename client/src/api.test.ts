@@ -7,6 +7,33 @@ afterEach(() => {
 });
 
 describe("api", () => {
+  it("includes a stable request ID when creating a routine record", async () => {
+    const record = {
+      type: "diaper" as const,
+      at: "2026-08-14T12:00:00.000Z",
+      title: "Diaper — wet",
+      detail: "",
+      meta: { kind: "wet" as const },
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: 9, ...record }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.createRecord({ record, requestId: "record-request-123" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/records",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ ...record, requestId: "record-request-123" }),
+      }),
+    );
+  });
+
   it("includes the browser IANA timezone in brief requests", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ message: null }), {

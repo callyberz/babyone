@@ -4,6 +4,7 @@ import { useBrief, useChat, useMessages } from "../queries";
 import { fmtAgo, fmtDay, fmtTime, formatTimezone } from "../utils";
 import { Icon } from "./icons";
 import { RecordIcon } from "./RecordIcon";
+import { createRequestId } from "../requestId";
 
 const suggestionsFor = (babyName: string) => [
   "Bottle 3 oz",
@@ -18,13 +19,6 @@ type LocalChatMessage = ChatMessage & {
   requestId: string;
   sendState: "sending" | "failed";
   error?: string;
-};
-
-const newRequestId = (): string => {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 };
 
 export function ChatScreen({
@@ -178,7 +172,7 @@ export function ChatScreen({
       at: new Date().toISOString(),
       text,
       recordIds: [],
-      requestId: newRequestId(),
+      requestId: createRequestId(),
       sendState: "sending",
     };
     submit(tempUser);

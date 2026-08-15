@@ -22,6 +22,11 @@ export interface AuthSession {
   current: boolean;
 }
 
+export interface CreateRecordInput {
+  record: RoutineRecordDraft;
+  requestId: string;
+}
+
 const json = async <T>(r: Response): Promise<T> => {
   if (r.status === 401) throw new UnauthenticatedError();
   if (!r.ok) {
@@ -93,8 +98,10 @@ export const api = {
       body: JSON.stringify(baby),
     }).then((r) => json<Baby>(r)),
   listRecords: () => req("/api/records").then((r) => json<RoutineRecord[]>(r)),
-  createRecord: (record: RoutineRecordDraft) =>
-    post("/api/records", record).then((r) => json<RoutineRecord>(r)),
+  createRecord: ({ record, requestId }: CreateRecordInput) =>
+    post("/api/records", { ...record, requestId }).then((r) =>
+      json<RoutineRecord>(r),
+    ),
   updateRecord: (rec: RoutineRecord) =>
     req(`/api/records/${rec.id}`, {
       method: "PUT",

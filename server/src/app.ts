@@ -16,6 +16,7 @@ import type {
   ChatApiResponse,
   ChatRequestClaim,
   HouseholdExport,
+  RecordRequestResult,
 } from "./db.js";
 import { validateBaby, validateRecordDraft } from "./types.js";
 import type { ConversationTurn } from "./llm.js";
@@ -33,6 +34,7 @@ import {
 import { mountAuthRoutes, mountInviteRoutes } from "./auth/routes.js";
 import {
   parseRecordId,
+  parseOptionalRequestId,
   parseSyncCursor,
   validateBriefRequest,
   validateBulkDeleteRequest,
@@ -71,6 +73,12 @@ export interface AppDependencies {
   insertRecord: (
     record: Omit<RoutineRecord, "id"> & { userId?: number | null },
   ) => RoutineRecord;
+  createRecordIdempotently: (input: {
+    userId: number;
+    requestId: string;
+    record: Omit<RoutineRecord, "id" | "user">;
+    createdAt: string;
+  }) => RecordRequestResult;
   updateRecord: (record: RoutineRecord) => RoutineRecord;
   deleteRecord: (id: number) => void;
   bulkDeleteRecords: (ids: number[]) => number[];
@@ -204,12 +212,30 @@ export function createApp(deps: AppDependencies): Hono<AuthEnv> {
   app.get("/api/records", (c) => c.json(deps.listRecords()));
 
   app.post("/api/records", async (c) => {
-    const body = await c.req.json().catch(() => null);
+    const body: unknown = await c.req.json().catch(() => null);
     const validation = validateRecordDraft(body);
     if (!validation.ok) {
       return c.json({ error: "invalid_record", issues: validation.issues }, 400);
     }
+    const requestId = parseOptionalRequestId(body);
+    if (requestId === false) return c.json({ error: "bad_request" }, 400);
     const user = c.get("user");
+    if (requestId) {
+      const result = deps.createRecordIdempotently({
+        userId: user.id,
+        requestId,
+        record: validation.value,
+        createdAt: now().toISOString(),
+      });
+      if (result.state === "conflict") {
+        return c.json({ error: "request_id_conflict" }, 409);
+      }
+      if (result.state === "gone") {
+        return c.json({ error: "record_gone" }, 410);
+      }
+      return c.json(result.record);
+    }
+    // Older clients omit requestId and retain the original one-shot behavior.
     return c.json(
       deps.insertRecord({ ...validation.value, userId: user.id }),
     );

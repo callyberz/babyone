@@ -48,6 +48,7 @@ const app = createApp({
   findRecords: repository.findRecords,
   getRecord: repository.getRecord,
   insertRecord: repository.insertRecord,
+  createRecordIdempotently: repository.createRecordIdempotently,
   updateRecord: repository.updateRecord,
   deleteRecord: repository.deleteRecord,
   bulkDeleteRecords: repository.bulkDeleteRecords,
@@ -71,6 +72,7 @@ beforeEach(() => {
     DELETE FROM invites;
     DELETE FROM sessions;
     DELETE FROM chat_requests;
+    DELETE FROM record_requests;
     DELETE FROM brief_requests;
     DELETE FROM messages;
     DELETE FROM records;
@@ -260,6 +262,54 @@ describe("record routes", () => {
       method: "DELETE",
     });
     expect(deleted.status).toBe(200);
+    expect(repository.listRecords()).toEqual([]);
+  });
+
+  it("creates an idempotent record once and replays only its current state", async () => {
+    const requestId = "record-request-integration-1";
+    const create = () =>
+      request("/api/records", {
+        method: "POST",
+        body: { ...recordDraft, requestId },
+      });
+
+    const firstResponse = await create();
+    expect(firstResponse.status).toBe(200);
+    const first = (await firstResponse.json()) as { id: number; title: string };
+
+    const retry = await create();
+    expect(retry.status).toBe(200);
+    expect(await retry.json()).toEqual(first);
+    expect(repository.listRecords()).toHaveLength(1);
+
+    const conflict = await request("/api/records", {
+      method: "POST",
+      body: { ...recordDraft, title: "Different diaper", requestId },
+    });
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toEqual({ error: "request_id_conflict" });
+
+    const update = await request(`/api/records/${first.id}`, {
+      method: "PUT",
+      body: { ...recordDraft, title: "Corrected diaper" },
+    });
+    expect(update.status).toBe(200);
+
+    const retryAfterEdit = await create();
+    expect(retryAfterEdit.status).toBe(200);
+    expect(await retryAfterEdit.json()).toMatchObject({
+      id: first.id,
+      title: "Corrected diaper",
+    });
+
+    const remove = await request(`/api/records/${first.id}`, {
+      method: "DELETE",
+    });
+    expect(remove.status).toBe(200);
+
+    const retryAfterDelete = await create();
+    expect(retryAfterDelete.status).toBe(410);
+    expect(await retryAfterDelete.json()).toEqual({ error: "record_gone" });
     expect(repository.listRecords()).toEqual([]);
   });
 

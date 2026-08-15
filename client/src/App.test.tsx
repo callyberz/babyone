@@ -104,6 +104,7 @@ describe("AuthGate", () => {
     expect(
       await screen.findByRole("heading", { name: "Chat about Clement" }),
     ).toBeInTheDocument();
+    expect(await screen.findByText(/Household synced/)).toBeInTheDocument();
     await user.click(
       screen.getByRole("button", { name: "Edit Clement's profile" }),
     );
