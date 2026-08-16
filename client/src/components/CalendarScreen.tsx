@@ -4,6 +4,53 @@ import { getCategory } from "../types";
 import { fmtDay, fmtTime } from "../utils";
 import { Icon } from "./icons";
 
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function startOfDay(value: Date) {
+  const date = new Date(value);
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function startOfMonth(value: Date) {
+  const date = startOfDay(value);
+  date.setDate(1);
+  return date;
+}
+
+function sameMonth(a: Date, b: Date) {
+  return a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear();
+}
+
+function fullDateLabel(date: Date) {
+  return date.toLocaleDateString([], {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function shortDateLabel(date: Date) {
+  return date.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function recordCount(count: number) {
+  return `${count} ${count === 1 ? "record" : "records"}`;
+}
+
+function recordBreakdown(records: RoutineRecord[]) {
+  const counts = new Map<string, number>();
+  records.forEach((record) => {
+    const label = getCategory(record.type).label;
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  });
+  return [...counts.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([label, count]) => `${count} ${label}`)
+    .join(", ");
+}
+
 export function CalendarScreen({
   records,
   openRecord,
@@ -13,17 +60,8 @@ export function CalendarScreen({
   openRecord: (r: RoutineRecord) => void;
   babyName?: string;
 }) {
-  const [cursor, setCursor] = useState(() => {
-    const d = new Date();
-    d.setDate(1);
-    d.setHours(0, 0, 0, 0);
-    return d;
-  });
-  const [selected, setSelected] = useState(() => {
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    return d;
-  });
+  const [cursor, setCursor] = useState(() => startOfMonth(new Date()));
+  const [selected, setSelected] = useState(() => startOfDay(new Date()));
 
   const monthEnd = new Date(cursor);
   monthEnd.setMonth(monthEnd.getMonth() + 1);
@@ -32,184 +70,263 @@ export function CalendarScreen({
   const totalCells = Math.ceil((startOffset + monthEnd.getDate()) / 7) * 7;
 
   const byDay = useMemo(() => {
-    const m = new Map<number, RoutineRecord[]>();
-    records.forEach((r) => {
-      const d = new Date(r.at);
-      d.setHours(0, 0, 0, 0);
-      const k = d.getTime();
-      if (!m.has(k)) m.set(k, []);
-      m.get(k)!.push(r);
+    const grouped = new Map<number, RoutineRecord[]>();
+    records.forEach((record) => {
+      const timestamp = new Date(record.at);
+      if (Number.isNaN(timestamp.getTime())) return;
+      const key = startOfDay(timestamp).getTime();
+      const day = grouped.get(key) ?? [];
+      day.push(record);
+      grouped.set(key, day);
     });
-    return m;
+    return grouped;
   }, [records]);
 
   const cells: Date[] = [];
   for (let i = 0; i < totalCells; i++) {
-    const d = new Date(cursor);
-    d.setDate(d.getDate() + (i - startOffset));
-    cells.push(d);
+    const date = new Date(cursor);
+    date.setDate(date.getDate() + (i - startOffset));
+    cells.push(date);
   }
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const sel = byDay.get(selected.getTime()) ?? [];
+  const today = startOfDay(new Date());
+  const selectedRecords = [...(byDay.get(selected.getTime()) ?? [])].sort(
+    (a, b) => new Date(a.at).getTime() - new Date(b.at).getTime() || a.id - b.id,
+  );
   const sumByType: Partial<Record<RecordType, number>> = {};
-  sel.forEach((r) => {
-    sumByType[r.type] = (sumByType[r.type] ?? 0) + 1;
+  selectedRecords.forEach((record) => {
+    sumByType[record.type] = (sumByType[record.type] ?? 0) + 1;
   });
+
+  const monthDays = [...byDay.entries()]
+    .filter(([key]) => sameMonth(new Date(key), cursor))
+    .sort(([a], [b]) => a - b);
+  const monthRecordCount = monthDays.reduce(
+    (total, [, dayRecords]) => total + dayRecords.length,
+    0,
+  );
+  const busiestDay = monthDays.reduce<(typeof monthDays)[number] | null>(
+    (busiest, day) =>
+      !busiest || day[1].length > busiest[1].length ? day : busiest,
+    null,
+  );
 
   const monthLabel = cursor.toLocaleDateString([], {
     month: "long",
     year: "numeric",
   });
+  const monthHeadingId = "calendar-month-heading";
+  const monthSummaryId = "calendar-month-summary-heading";
+
+  const moveMonth = (offset: number) => {
+    const next = new Date(cursor);
+    next.setMonth(next.getMonth() + offset);
+    setCursor(next);
+    setSelected(new Date(next));
+  };
+
+  const goToToday = () => {
+    const date = startOfDay(new Date());
+    setCursor(startOfMonth(date));
+    setSelected(date);
+  };
 
   return (
     <div className="content-pad">
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 12,
-        }}
-      >
-        <h2 className="serif" style={{ margin: 0, fontSize: 24 }}>
+      <div className="cal-toolbar">
+        <h2
+          className="serif"
+          id={monthHeadingId}
+          aria-live="polite"
+        >
           {monthLabel}
         </h2>
-        <div style={{ display: "flex", gap: 6 }}>
+        <div className="cal-nav" aria-label="Calendar navigation">
           <button
-            className="btn btn-ghost"
-            onClick={() => {
-              const c = new Date(cursor);
-              c.setMonth(c.getMonth() - 1);
-              setCursor(c);
-            }}
+            type="button"
+            className="btn btn-ghost cal-nav-button"
+            aria-label="Previous month"
+            onClick={() => moveMonth(-1)}
           >
-            <Icon.back />
+            <Icon.back aria-hidden="true" focusable="false" />
           </button>
           <button
+            type="button"
             className="btn"
-            onClick={() => {
-              const d = new Date();
-              d.setDate(1);
-              d.setHours(0, 0, 0, 0);
-              setCursor(d);
-              const t = new Date();
-              t.setHours(0, 0, 0, 0);
-              setSelected(t);
-            }}
+            aria-label={`Go to today, ${fullDateLabel(today)}`}
+            onClick={goToToday}
           >
             Today
           </button>
           <button
-            className="btn btn-ghost"
-            onClick={() => {
-              const c = new Date(cursor);
-              c.setMonth(c.getMonth() + 1);
-              setCursor(c);
-            }}
+            type="button"
+            className="btn btn-ghost cal-nav-button"
+            aria-label="Next month"
+            onClick={() => moveMonth(1)}
           >
-            <Icon.fwd />
+            <Icon.fwd aria-hidden="true" focusable="false" />
           </button>
         </div>
       </div>
 
-      <div className="cal-grid">
-        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
-          <div className="cal-head" key={d}>
-            {d}
+      <div className="cal-grid" aria-labelledby={monthHeadingId}>
+        {WEEKDAYS.map((day) => (
+          <div className="cal-head" key={day}>
+            {day}
           </div>
         ))}
-        {cells.map((d, i) => {
-          const inMonth = d.getMonth() === cursor.getMonth();
-          const isToday = d.getTime() === today.getTime();
-          const isSel = d.getTime() === selected.getTime();
-          const recs = byDay.get(d.getTime()) ?? [];
-          const types = [...new Set(recs.map((r) => r.type))].slice(0, 6);
+        {cells.map((date) => {
+          const inMonth = sameMonth(date, cursor);
+          const isToday = date.getTime() === today.getTime();
+          const isSelected = date.getTime() === selected.getTime();
+          const dayRecords = byDay.get(date.getTime()) ?? [];
+          const types = [...new Set(dayRecords.map((record) => record.type))];
+          const breakdown = recordBreakdown(dayRecords);
+          const label = [
+            fullDateLabel(date),
+            isToday ? "today" : "",
+            recordCount(dayRecords.length),
+            breakdown,
+            isSelected ? "selected" : "",
+          ]
+            .filter(Boolean)
+            .join(", ");
+
           return (
-            <div
-              key={i}
+            <button
+              type="button"
+              key={date.getTime()}
               className={`cal-day ${inMonth ? "" : "muted"} ${isToday ? "today" : ""} ${
-                isSel && !isToday ? "selected" : ""
+                isSelected ? "selected" : ""
               }`}
-              onClick={() => setSelected(new Date(d))}
+              aria-label={label}
+              aria-pressed={isSelected}
+              aria-current={isToday ? "date" : undefined}
+              onClick={() => setSelected(new Date(date))}
             >
-              <div className="d">{d.getDate()}</div>
-              <div className="cal-dots">
-                {types.map((t) => (
+              <span className="d" aria-hidden="true">
+                {date.getDate()}
+              </span>
+              {dayRecords.length > 0 && (
+                <span className="cal-day-count" aria-hidden="true">
+                  {dayRecords.length} {dayRecords.length === 1 ? "log" : "logs"}
+                </span>
+              )}
+              <span className="cal-dots" aria-hidden="true">
+                {types.map((type) => (
                   <span
-                    key={t}
+                    key={type}
                     className="cal-dot"
                     style={{
                       background: isToday
                         ? "var(--accent-ink)"
-                        : getCategory(t).tint,
+                        : getCategory(type).tint,
                     }}
                   />
                 ))}
-              </div>
-            </div>
+              </span>
+            </button>
           );
         })}
       </div>
 
-      <div className="section-h">
-        {fmtDay(selected)} — {sel.length}{" "}
-        {sel.length === 1 ? "record" : "records"}
+      <section
+        className="cal-month-summary"
+        aria-labelledby={monthSummaryId}
+        aria-live="polite"
+      >
+        <div>
+          <h3 id={monthSummaryId}>{monthLabel} overview</h3>
+          <p>
+            {monthRecordCount === 0
+              ? `No activity logged for ${babyName} this month.`
+              : `${recordCount(monthRecordCount)} across ${monthDays.length} active ${
+                  monthDays.length === 1 ? "day" : "days"
+                }.`}
+          </p>
+        </div>
+        <dl>
+          <div>
+            <dt>Records</dt>
+            <dd>{monthRecordCount}</dd>
+          </div>
+          <div>
+            <dt>Active days</dt>
+            <dd>{monthDays.length}</dd>
+          </div>
+          <div>
+            <dt>Busiest day</dt>
+            <dd>
+              {busiestDay
+                ? `${shortDateLabel(new Date(busiestDay[0]))} · ${recordCount(
+                    busiestDay[1].length,
+                  )}`
+                : "—"}
+            </dd>
+          </div>
+        </dl>
+      </section>
+
+      <div className="section-h" role="status" aria-live="polite">
+        {fmtDay(selected)} — {recordCount(selectedRecords.length)}
       </div>
-      {sel.length === 0 ? (
+      {selectedRecords.length === 0 ? (
         <div className="empty">
           No records logged for {babyName} this day.
         </div>
       ) : (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-            gap: 10,
-          }}
-        >
-          {Object.entries(sumByType).map(([t, n]) => {
-            const cat = getCategory(t);
+        <div className="cal-selected-summary">
+          {Object.entries(sumByType).map(([type, count]) => {
+            const category = getCategory(type);
             return (
-              <div className="stat-card" key={t}>
+              <div className="stat-card" key={type}>
                 <div className="lbl">
                   <span
                     className="stat-swatch"
-                    style={{ background: cat.tint }}
+                    style={{ background: category.tint }}
                   />{" "}
-                  {cat.label}
+                  {category.label}
                 </div>
-                <div className="val">{n}</div>
-                <div className="sub">{n === 1 ? "entry" : "entries"}</div>
+                <div className="val">{count}</div>
+                <div className="sub">{count === 1 ? "entry" : "entries"}</div>
               </div>
             );
           })}
         </div>
       )}
 
-      {sel.length > 0 && (
+      {selectedRecords.length > 0 && (
         <>
           <div className="section-h">Entries</div>
           <div className="tl">
-            {sel.map((r) => {
-              const cat = getCategory(r.type);
+            {selectedRecords.map((record) => {
+              const category = getCategory(record.type);
               return (
-                <div className="tl-item" key={r.id}>
-                  <div className="tl-dot" style={{ borderColor: cat.tint }} />
-                  <div className="tl-time">{fmtTime(r.at)}</div>
-                  <div className="tl-card" onClick={() => openRecord(r)}>
+                <div className="tl-item" key={record.id}>
+                  <div className="tl-dot" style={{ borderColor: category.tint }} />
+                  <div className="tl-time">{fmtTime(record.at)}</div>
+                  <button
+                    type="button"
+                    className="tl-card"
+                    aria-label={`Edit ${record.title} at ${fmtTime(record.at)}`}
+                    onClick={() => openRecord(record)}
+                  >
                     <div
                       className="tl-ico"
-                      style={{ background: `${cat.tint}22`, color: cat.tint }}
+                      style={{
+                        background: `${category.tint}22`,
+                        color: category.tint,
+                      }}
+                      aria-hidden="true"
                     >
-                      {cat.icon}
+                      {category.icon}
                     </div>
                     <div className="tl-body">
-                      <div className="tl-title">{r.title}</div>
-                      {r.detail && <div className="tl-detail">{r.detail}</div>}
+                      <div className="tl-title">{record.title}</div>
+                      {record.detail && <div className="tl-detail">{record.detail}</div>}
                     </div>
-                  </div>
+                    <div className="tl-tag">{category.label}</div>
+                  </button>
                 </div>
               );
             })}

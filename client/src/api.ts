@@ -162,6 +162,33 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ displayName }),
     }).then((r) => json<{ user: User }>(r)),
+  changePassword: (input: {
+    currentPassword: string;
+    newPassword: string;
+  }) =>
+    req("/api/auth/password", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    }).then(async (r) => {
+      if (!r.ok) {
+        const body = (await r.clone().json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        const message = body?.error
+          ? {
+              invalid_credentials: "Current password is incorrect.",
+              password_unchanged: "Choose a different new password.",
+              weak_password: "New password must be at least 8 characters.",
+              too_many_attempts: "Too many attempts. Please wait and try again.",
+            }[body.error]
+          : undefined;
+        if (message) {
+          throw new Error(message);
+        }
+      }
+      return json<{ ok: true; revokedSessions: number }>(r);
+    }),
   listSessions: () =>
     req("/api/auth/sessions").then((r) =>
       json<{ sessions: AuthSession[] }>(r),

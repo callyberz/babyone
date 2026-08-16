@@ -6,7 +6,7 @@ import { hashPassword } from "./passwords.js";
 import { createInvite } from "./invites.js";
 import {
   mountAuthRoutes,
-  mountInviteRoutes,
+  mountAuthenticatedRoutes,
   resetAuthRateLimiters,
 } from "./routes.js";
 import { makeRequireAuth, type AuthEnv } from "./middleware.js";
@@ -38,9 +38,10 @@ beforeEach(async () => {
 
   app = new Hono<AuthEnv>();
   mountAuthRoutes(app, db);
-  // mirror index.ts: gate /api/invites behind requireAuth
-  app.use("/api/invites", makeRequireAuth(db));
-  mountInviteRoutes(app, db);
+  // Mirror production: public auth routes are registered first, then all
+  // subsequently mounted account routes are gated by requireAuth.
+  app.use("/api/*", makeRequireAuth(db));
+  mountAuthenticatedRoutes(app, db);
 
   // Belt-and-suspenders: reset the module-level rate limiter so a 429 test
   // in another file (same worker, different describe block) cannot bleed in.

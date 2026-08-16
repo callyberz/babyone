@@ -62,6 +62,14 @@ export function useUpdateProfile() {
   });
 }
 
+export function useChangePassword() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.changePassword,
+    onSuccess: () => qc.invalidateQueries({ queryKey: sessionsKey }),
+  });
+}
+
 export const sessionsKey = ["auth-sessions"] as const;
 
 export function useSessions(enabled: boolean) {

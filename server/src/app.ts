@@ -31,7 +31,7 @@ import {
   makeRequireAuth,
   type AuthEnv,
 } from "./auth/middleware.js";
-import { mountAuthRoutes, mountInviteRoutes } from "./auth/routes.js";
+import { mountAuthRoutes, mountAuthenticatedRoutes } from "./auth/routes.js";
 import {
   parseRecordId,
   parseOptionalRequestId,
@@ -196,7 +196,7 @@ export function createApp(deps: AppDependencies): Hono<AuthEnv> {
   mountAuthRoutes(app, deps.db);
 
   app.use("/api/*", makeRequireAuth(deps.db));
-  mountInviteRoutes(app, deps.db);
+  mountAuthenticatedRoutes(app, deps.db);
 
   app.get("/api/baby", (c) => c.json(deps.getBaby()));
 

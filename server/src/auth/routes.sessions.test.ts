@@ -3,7 +3,7 @@ import Database from "better-sqlite3";
 import { Hono } from "hono";
 import { applyAuthSchema } from "../db.js";
 import { makeRequireAuth, type AuthEnv } from "./middleware.js";
-import { mountInviteRoutes } from "./routes.js";
+import { mountAuthenticatedRoutes } from "./routes.js";
 import { createSession, findSession, sessionPublicId } from "./sessions.js";
 
 const ORIGIN = "http://localhost:5173";
@@ -34,7 +34,7 @@ beforeEach(() => {
 
   app = new Hono<AuthEnv>();
   app.use("/api/*", makeRequireAuth(db));
-  mountInviteRoutes(app, db);
+  mountAuthenticatedRoutes(app, db);
 });
 
 const request = (path: string, init?: RequestInit) =>

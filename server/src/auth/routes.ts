@@ -74,6 +74,11 @@ export const resetCodeRl = new LoginRateLimiter({
   windowMs: RATE_WINDOW_MS,
   caseInsensitive: false,
 });
+export const passwordChangeAccountIpRl = new LoginRateLimiter({
+  maxAttempts: 10,
+  windowMs: RATE_WINDOW_MS,
+  caseInsensitive: false,
+});
 
 export function resetAuthRateLimiters(): void {
   loginIpRl.clear();
@@ -82,6 +87,7 @@ export function resetAuthRateLimiters(): void {
   signupInviteRl.clear();
   resetIpRl.clear();
   resetCodeRl.clear();
+  passwordChangeAccountIpRl.clear();
 }
 
 function asBoundedString(
@@ -348,11 +354,82 @@ export function mountAuthRoutes(
   });
 }
 
-// Registered separately so it can be mounted AFTER requireAuth in index.ts.
-export function mountInviteRoutes(
+// Registered separately so these account routes can be mounted after requireAuth.
+export function mountAuthenticatedRoutes(
   app: Hono<AuthEnv>,
   db: DatabaseT.Database,
 ): void {
+  app.put("/api/auth/password", async (c) => {
+    const body = await readJsonObject(c);
+    if (!body) return c.json({ error: "bad_request" }, 400);
+    const currentPassword = asBoundedString(
+      body.currentPassword,
+      PASSWORD_MAX,
+    );
+    const newPassword = asBoundedString(body.newPassword, PASSWORD_MAX);
+    if (!currentPassword || !newPassword) {
+      return c.json({ error: "bad_request" }, 400);
+    }
+    if (newPassword.length < 8) {
+      return c.json({ error: "weak_password" }, 400);
+    }
+
+    const user = c.get("user");
+    const ip = clientIp(c);
+    const rateLimitKey = `${ip}\u0000${user.id}`;
+    const passwordLimit = rateLimited(c, [
+      passwordChangeAccountIpRl.checkDetailed(rateLimitKey),
+    ]);
+    if (passwordLimit) return passwordLimit;
+
+    const credential = db
+      .prepare("SELECT password_hash FROM users WHERE id = ?")
+      .get(user.id) as { password_hash: string } | undefined;
+    const currentPasswordValid = credential
+      ? await verifyPassword(credential.password_hash, currentPassword)
+      : (await dummyVerify(currentPassword), false);
+    if (!credential || !currentPasswordValid) {
+      return c.json({ error: "invalid_credentials" }, 401);
+    }
+
+    passwordChangeAccountIpRl.reset(rateLimitKey);
+    if (currentPassword === newPassword) {
+      return c.json({ error: "password_unchanged" }, 400);
+    }
+
+    const currentSid = getCookie(c, COOKIE);
+    if (!currentSid) return c.json({ error: "unauthenticated" }, 401);
+    const newPasswordHash = await hashPassword(newPassword);
+    const tx = db.transaction(() => {
+      // Compare-and-swap prevents a concurrent reset or password change from
+      // being overwritten after the expensive hash was computed.
+      const updated = db
+        .prepare(
+          "UPDATE users SET password_hash = ? WHERE id = ? AND password_hash = ?",
+        )
+        .run(newPasswordHash, user.id, credential.password_hash);
+      if (updated.changes !== 1) throw new Error("credentials_changed");
+
+      const revokedSessions = db
+        .prepare("DELETE FROM sessions WHERE user_id = ? AND id <> ?")
+        .run(user.id, currentSid).changes;
+      // Password links issued before this authenticated change should no
+      // longer be able to replace the newly chosen credential.
+      db.prepare("DELETE FROM password_resets WHERE user_id = ?").run(user.id);
+      return revokedSessions;
+    });
+
+    try {
+      const revokedSessions = tx.immediate();
+      return c.json({ ok: true, revokedSessions });
+    } catch (error) {
+      if (error instanceof Error && error.message === "credentials_changed") {
+        return c.json({ error: "invalid_credentials" }, 401);
+      }
+      throw error;
+    }
+  });
+
   app.put("/api/auth/profile", async (c) => {
     const body = await readJsonObject(c);
     if (!body) return c.json({ error: "bad_request" }, 400);

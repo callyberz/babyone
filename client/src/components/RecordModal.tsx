@@ -1,7 +1,44 @@
-import { useEffect, useState } from "react";
+import {
+  MAX_RECORD_DETAIL_LENGTH,
+  MAX_RECORD_QUANTITY,
+  MAX_RECORD_TITLE_LENGTH,
+  validateRecordDraft,
+} from "@babyone/contracts";
+import { useEffect, useRef, useState } from "react";
 import type { RoutineRecord } from "../types";
 import { getCategory } from "../types";
 import { Icon } from "./icons";
+
+const FOCUSABLE =
+  'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
+
+function keepFocusInDialog(
+  event: KeyboardEvent,
+  dialog: HTMLElement | null,
+): void {
+  if (event.key !== "Tab" || !dialog) return;
+  const focusable = Array.from(
+    dialog.querySelectorAll<HTMLElement>(FOCUSABLE),
+  );
+  if (focusable.length === 0) {
+    event.preventDefault();
+    dialog.focus();
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  const active = document.activeElement;
+  if (!dialog.contains(active) || !focusable.includes(active as HTMLElement)) {
+    event.preventDefault();
+    (event.shiftKey ? last : first).focus();
+  } else if (event.shiftKey && active === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && active === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
 
 export function RecordModal({
   record,
@@ -15,19 +52,42 @@ export function RecordModal({
   onDelete: (id: number) => Promise<void>;
 }) {
   const [draft, setDraft] = useState<RoutineRecord>({ ...record });
+  const initialDate = new Date(record.at);
+  const [time, setTime] = useState(
+    `${String(initialDate.getHours()).padStart(2, "0")}:${String(initialDate.getMinutes()).padStart(2, "0")}`,
+  );
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLFormElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(
+    typeof document !== "undefined" &&
+      document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null,
+  );
   const cat = getCategory(draft.type);
   const busy = saving || deleting;
 
+  useEffect(
+    () => () => {
+      returnFocusRef.current?.focus();
+    },
+    [],
+  );
+
   useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !busy) onClose();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        if (!busy) onClose();
+        return;
+      }
+      keepFocusInDialog(event, dialogRef.current);
     };
-    document.addEventListener("keydown", closeOnEscape);
-    return () => document.removeEventListener("keydown", closeOnEscape);
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
   }, [busy, onClose]);
 
   const setField = <K extends keyof RoutineRecord>(k: K, v: RoutineRecord[K]) =>
@@ -37,21 +97,36 @@ export function RecordModal({
       (d) => ({ ...d, meta: { ...d.meta, [k]: v } }) as RoutineRecord,
     );
 
-  const atDate = new Date(draft.at);
-  const timeStr = `${String(atDate.getHours()).padStart(2, "0")}:${String(atDate.getMinutes()).padStart(2, "0")}`;
-  const onTimeChange = (v: string) => {
-    const [h, m] = v.split(":").map(Number);
-    const d = new Date(draft.at);
-    d.setHours(h, m, 0, 0);
-    setField("at", d.toISOString());
+  const timeValid = /^\d{2}:\d{2}$/.test(time);
+  const validation = validateRecordDraft(draft);
+  const issues = validation.ok ? [] : validation.issues;
+  const titleInvalid = issues.some((issue) => issue.startsWith("title"));
+  const detailInvalid = issues.some((issue) => issue.startsWith("detail"));
+  const quantityInvalid = issues.some(
+    (issue) =>
+      issue.startsWith("meta.volume_oz") || issue.startsWith("meta.mins"),
+  );
+  const formValid = timeValid && validation.ok;
+
+  const onTimeChange = (value: string) => {
+    setTime(value);
+    if (!/^\d{2}:\d{2}$/.test(value)) return;
+    const [hours, minutes] = value.split(":").map(Number);
+    const date = new Date(draft.at);
+    date.setHours(hours, minutes, 0, 0);
+    if (!Number.isNaN(date.getTime())) setField("at", date.toISOString());
   };
 
   const save = async () => {
-    if (busy) return;
+    if (!timeValid || !validation.ok || busy) return;
     setSaving(true);
     setError(null);
     try {
-      await onSave(draft);
+      await onSave({
+        ...validation.value,
+        id: draft.id,
+        user: draft.user,
+      } as RoutineRecord);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save this record");
@@ -76,19 +151,28 @@ export function RecordModal({
     }
   };
 
+  const setOptionalNumber = (key: string, value: string) => {
+    setMeta(key, value === "" ? undefined : Number(value));
+  };
+
   return (
     <div
       className="modal-backdrop"
-      onClick={() => {
-        if (!busy) onClose();
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !busy) onClose();
       }}
     >
-      <div
+      <form
         className="modal"
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="record-modal-title"
-        onClick={(e) => e.stopPropagation()}
+        aria-describedby="record-modal-description"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!confirmingDelete) void save();
+        }}
       >
         <div className="modal-h">
           <div className="cluster">
@@ -102,6 +186,7 @@ export function RecordModal({
                 fontSize: 16,
                 borderRadius: 9,
               }}
+              aria-hidden="true"
             >
               {cat.icon}
             </div>
@@ -109,20 +194,29 @@ export function RecordModal({
           </div>
           <button
             className="modal-close"
+            type="button"
             onClick={onClose}
-            aria-label="Close"
+            aria-label="Close record editor"
             disabled={busy}
           >
             <Icon.close />
           </button>
+        </div>
+        <div className="modal-sub" id="record-modal-description">
+          Update the details for this {cat.label.toLowerCase()} record.
         </div>
 
         <div className="modal-field">
           <label htmlFor="record-title">Title</label>
           <input
             id="record-title"
+            required
+            autoFocus
+            maxLength={MAX_RECORD_TITLE_LENGTH}
+            aria-invalid={titleInvalid || undefined}
+            aria-describedby={titleInvalid ? "record-modal-validation" : undefined}
             value={draft.title}
-            onChange={(e) => setField("title", e.target.value)}
+            onChange={(event) => setField("title", event.target.value)}
           />
         </div>
 
@@ -131,8 +225,11 @@ export function RecordModal({
           <input
             id="record-time"
             type="time"
-            value={timeStr}
-            onChange={(e) => onTimeChange(e.target.value)}
+            required
+            aria-invalid={!timeValid || undefined}
+            aria-describedby={!timeValid ? "record-modal-validation" : undefined}
+            value={time}
+            onChange={(event) => onTimeChange(event.target.value)}
           />
         </div>
         {record.user?.displayName && (
@@ -146,10 +243,17 @@ export function RecordModal({
               <input
                 id="record-volume"
                 type="number"
-                step="0.5"
-                value={(draft.meta?.volume_oz as number) ?? ""}
-                onChange={(e) =>
-                  setMeta("volume_oz", parseFloat(e.target.value) || 0)
+                min="0"
+                max={MAX_RECORD_QUANTITY}
+                step="any"
+                inputMode="decimal"
+                aria-invalid={quantityInvalid || undefined}
+                aria-describedby={
+                  quantityInvalid ? "record-modal-validation" : undefined
+                }
+                value={(draft.meta?.volume_oz as number | undefined) ?? ""}
+                onChange={(event) =>
+                  setOptionalNumber("volume_oz", event.target.value)
                 }
               />
             </div>
@@ -158,7 +262,7 @@ export function RecordModal({
               <select
                 id="record-side"
                 value={(draft.meta?.side as string) ?? "bottle"}
-                onChange={(e) => setMeta("side", e.target.value)}
+                onChange={(event) => setMeta("side", event.target.value)}
               >
                 <option value="bottle">Bottle</option>
                 <option value="left">Left breast</option>
@@ -174,8 +278,18 @@ export function RecordModal({
             <input
               id="record-duration"
               type="number"
-              value={(draft.meta?.mins as number) ?? 0}
-              onChange={(e) => setMeta("mins", parseInt(e.target.value) || 0)}
+              min="0"
+              max={MAX_RECORD_QUANTITY}
+              step="any"
+              inputMode="decimal"
+              aria-invalid={quantityInvalid || undefined}
+              aria-describedby={
+                quantityInvalid ? "record-modal-validation" : undefined
+              }
+              value={(draft.meta?.mins as number | undefined) ?? ""}
+              onChange={(event) =>
+                setOptionalNumber("mins", event.target.value)
+              }
             />
           </div>
         )}
@@ -185,7 +299,7 @@ export function RecordModal({
             <select
               id="record-kind"
               value={(draft.meta?.kind as string) ?? "wet"}
-              onChange={(e) => setMeta("kind", e.target.value)}
+              onChange={(event) => setMeta("kind", event.target.value)}
             >
               <option value="wet">Wet</option>
               <option value="dirty">Dirty</option>
@@ -199,14 +313,26 @@ export function RecordModal({
           <textarea
             id="record-notes"
             rows={3}
+            maxLength={MAX_RECORD_DETAIL_LENGTH}
+            aria-invalid={detailInvalid || undefined}
+            aria-describedby={detailInvalid ? "record-modal-validation" : undefined}
             value={draft.detail ?? ""}
-            onChange={(e) => setField("detail", e.target.value)}
+            onChange={(event) => setField("detail", event.target.value)}
           />
         </div>
 
         {error && (
           <div className="modal-error" role="alert">
             {error}
+          </div>
+        )}
+        {!formValid && (
+          <div
+            className="modal-hint"
+            id="record-modal-validation"
+            aria-live="polite"
+          >
+            {!timeValid ? "time is required" : issues[0]}
           </div>
         )}
 
@@ -216,6 +342,8 @@ export function RecordModal({
               <span>Delete this record?</span>
               <button
                 className="btn"
+                type="button"
+                autoFocus
                 onClick={() => setConfirmingDelete(false)}
                 disabled={busy}
               >
@@ -223,6 +351,7 @@ export function RecordModal({
               </button>
               <button
                 className="btn btn-ghost"
+                type="button"
                 style={{ color: "var(--warn)" }}
                 onClick={() => void remove()}
                 disabled={busy}
@@ -234,6 +363,7 @@ export function RecordModal({
             <>
               <button
                 className="btn btn-ghost"
+                type="button"
                 style={{ color: "var(--warn)" }}
                 onClick={() => {
                   setError(null);
@@ -244,20 +374,20 @@ export function RecordModal({
                 Delete
               </button>
               <div style={{ flex: 1 }} />
-              <button className="btn" onClick={onClose} disabled={busy}>
+              <button className="btn" type="button" onClick={onClose} disabled={busy}>
                 Cancel
               </button>
               <button
                 className="btn btn-primary"
-                onClick={() => void save()}
-                disabled={busy || draft.title.trim() === ""}
+                type="submit"
+                disabled={busy || !formValid}
               >
                 {saving ? "Saving…" : "Save"}
               </button>
             </>
           )}
         </div>
-      </div>
+      </form>
     </div>
   );
 }
