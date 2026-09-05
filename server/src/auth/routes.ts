@@ -11,7 +11,13 @@ import {
   sessionPublicId,
   SESSION_TTL_MS,
 } from "./sessions.js";
-import { createInvite, consumeInvite, isInviteAvailable } from "./invites.js";
+import {
+  createInvite,
+  consumeInvite,
+  isInviteAvailable,
+  listPendingInvites,
+  revokePendingInvite,
+} from "./invites.js";
 import { LoginRateLimiter, type RateLimitDecision } from "./rateLimit.js";
 import { isAdmin, type AuthEnv } from "./middleware.js";
 import {
@@ -484,13 +490,36 @@ export function mountAuthenticatedRoutes(
 
   app.post("/api/invites", (c) => {
     const user = c.get("user");
+    if (!isAdmin(user)) return c.json({ error: "forbidden" }, 403);
     const inv = createInvite(db, user.id);
     const origin = process.env.BABYONE_ORIGIN ?? "";
     return c.json({
+      id: inv.id,
       code: inv.code,
       expiresAt: inv.expiresAt,
       url: `${origin}/signup?code=${inv.code}`,
     });
+  });
+
+  app.get("/api/invites", (c) => {
+    if (!isAdmin(c.get("user"))) {
+      return c.json({ error: "forbidden" }, 403);
+    }
+    return c.json({ invites: listPendingInvites(db) });
+  });
+
+  app.delete("/api/invites/:id", (c) => {
+    if (!isAdmin(c.get("user"))) {
+      return c.json({ error: "forbidden" }, 403);
+    }
+    const inviteId = c.req.param("id");
+    if (!/^[A-Za-z0-9_-]{43}$/.test(inviteId)) {
+      return c.json({ error: "bad_request" }, 400);
+    }
+    if (!revokePendingInvite(db, inviteId)) {
+      return c.json({ error: "not_found" }, 404);
+    }
+    return c.json({ ok: true });
   });
 
   app.get("/api/caregivers", (c) => {

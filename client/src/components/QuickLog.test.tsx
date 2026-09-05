@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QuickLog } from "./QuickLog";
@@ -260,5 +260,69 @@ describe("QuickLog", () => {
     await userEvent.keyboard("{Escape}");
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("traps focus in the dialog and restores it to the opening action", async () => {
+    const user = userEvent.setup();
+    renderQuickLog();
+    const opener = screen.getByRole("button", { name: "Sleep" });
+    await user.click(opener);
+
+    expect(screen.getByLabelText("Duration (minutes)")).toHaveFocus();
+    const close = screen.getByRole("button", { name: "Close quick log" });
+    const submit = screen.getByRole("button", { name: "Log now" });
+    close.focus();
+    await user.tab({ shift: true });
+    expect(submit).toHaveFocus();
+    await user.tab();
+    expect(close).toHaveFocus();
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(opener).toHaveFocus();
+  });
+
+  it("only dismisses for a pointer press on the backdrop itself", async () => {
+    renderQuickLog();
+    await userEvent.click(screen.getByRole("button", { name: "Sleep" }));
+    const dialog = screen.getByRole("dialog", { name: "Log sleep" });
+
+    fireEvent.mouseDown(dialog);
+    expect(dialog).toBeInTheDocument();
+
+    fireEvent.mouseDown(dialog.parentElement!);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("blocks Escape and backdrop dismissal while logging", async () => {
+    let resolveSave!: (response: Response) => void;
+    fetchMock.mockReturnValueOnce(
+      new Promise<Response>((resolve) => {
+        resolveSave = resolve;
+      }),
+    );
+    renderQuickLog();
+    await userEvent.click(screen.getByRole("button", { name: "Sleep" }));
+    await userEvent.click(screen.getByRole("button", { name: "Log now" }));
+
+    expect(
+      await screen.findByRole("button", { name: "Logging…" }),
+    ).toBeDisabled();
+    const dialog = screen.getByRole("dialog", { name: "Log sleep" });
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    fireEvent.mouseDown(dialog.parentElement!);
+    expect(dialog).toBeInTheDocument();
+
+    await act(async () => {
+      resolveSave(
+        recordResponse({
+          type: "sleep",
+          title: "Sleep — 45 min",
+          meta: { mins: 45, where: null },
+        }),
+      );
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
   });
 });

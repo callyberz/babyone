@@ -20,6 +20,7 @@ const records: RoutineRecord[] = [
     title: "Vitamin D",
     detail: "After the morning feed",
     meta: { name: "Ddrops", dose: "1 drop" },
+    user: { id: 1, displayName: "Alex" },
   },
   {
     id: 13,
@@ -28,6 +29,7 @@ const records: RoutineRecord[] = [
     title: "Bottle feed",
     detail: "",
     meta: { side: "bottle", volume_oz: 4 },
+    user: { id: 2, displayName: "Jordan" },
   },
 ];
 
@@ -85,6 +87,27 @@ describe("TodayScreen timeline search", () => {
       "aria-pressed",
       "true",
     );
+  });
+
+  it("shows attribution and filters records by caregiver", async () => {
+    render(<TodayScreen records={records} openRecord={vi.fn()} />);
+    const user = userEvent.setup();
+
+    expect(screen.getByText("Logged by Alex")).toBeInTheDocument();
+    expect(screen.getByText("Logged by Jordan")).toBeInTheDocument();
+    expect(
+      screen.getByText("Logged by an earlier caregiver"),
+    ).toBeInTheDocument();
+
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Filter by caregiver" }),
+      "user:1",
+    );
+
+    expect(screen.getByText("Vitamin D")).toBeInTheDocument();
+    expect(screen.queryByText("Bottle feed")).not.toBeInTheDocument();
+    expect(screen.queryByText("Wet diaper")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("1 record");
   });
 
   it("opens timeline records from a keyboard-accessible button", async () => {

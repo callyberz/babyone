@@ -144,7 +144,7 @@ export function useUpdateRecord() {
     mutationFn: api.updateRecord,
     onSuccess: (saved) => {
       qc.setQueryData<RoutineRecord[]>(recordsKey, (rs) =>
-        (rs ?? []).map((r) => (r.id === saved.id ? saved : r)),
+        sortRecords((rs ?? []).map((r) => (r.id === saved.id ? saved : r))),
       );
     },
   });

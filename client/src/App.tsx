@@ -176,6 +176,7 @@ function AuthenticatedApp({ user }: { user: User }) {
               user={user}
               setView={setView}
               onEditBaby={() => setEditingBaby(true)}
+              openRecord={setEditing}
             />
           )}
           {view === "trends" && <TrendsScreen records={records} />}

@@ -5,6 +5,10 @@ import { fmtDay, fmtTime, recordChips } from "../utils";
 import { Icon } from "./icons";
 
 type Filter = "all" | RecordType;
+type CaregiverFilter = "all" | "unattributed" | `user:${number}`;
+
+const caregiverKey = (record: RoutineRecord): CaregiverFilter =>
+  record.user ? `user:${record.user.id}` : "unattributed";
 
 export function TodayScreen({
   records,
@@ -20,6 +24,7 @@ export function TodayScreen({
   babyName?: string;
 }) {
   const [filter, setFilter] = useState<Filter>("all");
+  const [caregiver, setCaregiver] = useState<CaregiverFilter>("all");
   const [query, setQuery] = useState("");
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -61,6 +66,7 @@ export function TodayScreen({
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const filtered = records.filter((r) => {
     if (filter !== "all" && r.type !== filter) return false;
+    if (caregiver !== "all" && caregiverKey(r) !== caregiver) return false;
     if (!normalizedQuery) return true;
 
     const metaValues = Object.values(r.meta ?? {}).filter(
@@ -72,6 +78,7 @@ export function TodayScreen({
       r.detail,
       r.type,
       getCategory(r.type).label,
+      r.user?.displayName,
       ...recordChips(r).map((chip) => chip.text),
       ...metaValues.map(String),
     ]
@@ -105,6 +112,15 @@ export function TodayScreen({
       ][]
     ).map(([k, v]) => [k, v.label] as [Filter, string]),
   ];
+  const caregivers = new Map<number, string>();
+  let hasUnattributed = false;
+  records.forEach((record) => {
+    if (record.user) caregivers.set(record.user.id, record.user.displayName);
+    else hasUnattributed = true;
+  });
+  const caregiverOptions = [...caregivers.entries()].sort((a, b) =>
+    a[1].localeCompare(b[1]),
+  );
 
   return (
     <div className="content-pad">
@@ -158,11 +174,33 @@ export function TodayScreen({
             </button>
           ))}
         </div>
-        {isAdmin && !selecting && (
-          <button className="btn btn-ghost" onClick={() => setSelecting(true)}>
-            Select
-          </button>
-        )}
+        <div className="timeline-filter-actions">
+          <label className="timeline-caregiver-filter">
+            <span>Caregiver</span>
+            <select
+              aria-label="Filter by caregiver"
+              value={caregiver}
+              onChange={(event) =>
+                setCaregiver(event.target.value as CaregiverFilter)
+              }
+            >
+              <option value="all">Everyone</option>
+              {caregiverOptions.map(([id, name]) => (
+                <option value={`user:${id}`} key={id}>
+                  {name}
+                </option>
+              ))}
+              {hasUnattributed && (
+                <option value="unattributed">Unattributed</option>
+              )}
+            </select>
+          </label>
+          {isAdmin && !selecting && (
+            <button className="btn btn-ghost" onClick={() => setSelecting(true)}>
+              Select
+            </button>
+          )}
+        </div>
       </div>
       {groups.map((g) => (
         <div key={g.day}>
@@ -222,6 +260,9 @@ export function TodayScreen({
                         </div>
                       )}
                       {r.detail && <div className="tl-detail">{r.detail}</div>}
+                      <div className="tl-attribution">
+                        Logged by {r.user?.displayName ?? "an earlier caregiver"}
+                      </div>
                     </div>
                     <div className="tl-tag">{cat.label}</div>
                   </button>
@@ -240,6 +281,7 @@ export function TodayScreen({
             onClick={() => {
               setQuery("");
               setFilter("all");
+              setCaregiver("all");
             }}
           >
             Clear filters

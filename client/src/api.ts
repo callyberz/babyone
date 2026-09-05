@@ -22,6 +22,16 @@ export interface AuthSession {
   current: boolean;
 }
 
+export interface PendingInvite {
+  id: string;
+  createdAt: string;
+  expiresAt: string;
+  createdBy: {
+    id: number;
+    displayName: string;
+  };
+}
+
 export interface CreateRecordInput {
   record: RoutineRecordDraft;
   requestId: string;
@@ -199,8 +209,16 @@ export const api = {
     }).then((r) => json<{ ok: boolean; current: boolean }>(r)),
   createInvite: () =>
     post("/api/invites", {}).then((r) =>
-      json<{ code: string; expiresAt: string; url: string }>(r),
+      json<{ id: string; code: string; expiresAt: string; url: string }>(r),
     ),
+  listPendingInvites: () =>
+    req("/api/invites").then((r) =>
+      json<{ invites: PendingInvite[] }>(r),
+    ),
+  revokeInvite: (id: string) =>
+    req(`/api/invites/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }).then((r) => json<{ ok: true }>(r)),
   listCaregivers: () =>
     req("/api/caregivers").then((r) => json<{ caregivers: User[] }>(r)),
   createPasswordReset: (userId: number) =>

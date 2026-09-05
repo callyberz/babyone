@@ -51,7 +51,8 @@ Administrator status is persisted in SQLite and no longer depends on those
 bootstrap variables remaining in the environment.
 
 Additional caregivers join via one-time invite links generated in the sidebar
-("Invite caregiver"). Invites expire after 24h.
+("Invite caregiver"). Invites expire after 24h. Administrators can review and
+revoke live unused invites without exposing their one-time codes again.
 
 Every caregiver can review their active signed-in devices from the sidebar and
 revoke an old phone or browser. The management API exposes only irreversible
@@ -73,6 +74,10 @@ sync freshness and offers a retry when the app is offline or disconnected.
 The Calendar workspace provides keyboard-accessible day navigation, exact
 daily log counts and categories, chronological day details, and a responsive
 monthly overview with active-day and busiest-day summaries.
+
+The timeline displays caregiver attribution and composes caregiver, category,
+and text filters. Dashboard handoffs can be copied or shared using a concise,
+secret-free summary, and activity rows open directly in the record editor.
 
 Caregiver timelines update incrementally in the background, so long household
 histories are not downloaded again on every refresh. Administrators can also

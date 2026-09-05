@@ -163,7 +163,7 @@ function CaregiverControls({
       </div>
       <ProfilePanel user={user} />
       <PasswordPanel />
-      <InvitePanel />
+      {user.isAdmin && <InvitePanel />}
       <SessionPanel />
       {user.isAdmin && <CaregiverAccessPanel currentUserId={user.id} />}
       {user.isAdmin && (

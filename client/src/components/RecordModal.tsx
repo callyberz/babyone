@@ -4,41 +4,11 @@ import {
   MAX_RECORD_TITLE_LENGTH,
   validateRecordDraft,
 } from "@babyone/contracts";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import type { RoutineRecord } from "../types";
 import { getCategory } from "../types";
 import { Icon } from "./icons";
-
-const FOCUSABLE =
-  'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
-
-function keepFocusInDialog(
-  event: KeyboardEvent,
-  dialog: HTMLElement | null,
-): void {
-  if (event.key !== "Tab" || !dialog) return;
-  const focusable = Array.from(
-    dialog.querySelectorAll<HTMLElement>(FOCUSABLE),
-  );
-  if (focusable.length === 0) {
-    event.preventDefault();
-    dialog.focus();
-    return;
-  }
-  const first = focusable[0];
-  const last = focusable[focusable.length - 1];
-  const active = document.activeElement;
-  if (!dialog.contains(active) || !focusable.includes(active as HTMLElement)) {
-    event.preventDefault();
-    (event.shiftKey ? last : first).focus();
-  } else if (event.shiftKey && active === first) {
-    event.preventDefault();
-    last.focus();
-  } else if (!event.shiftKey && active === last) {
-    event.preventDefault();
-    first.focus();
-  }
-}
+import { ModalDialog } from "./ModalDialog";
 
 export function RecordModal({
   record,
@@ -60,35 +30,8 @@ export function RecordModal({
   const [deleting, setDeleting] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const dialogRef = useRef<HTMLFormElement>(null);
-  const returnFocusRef = useRef<HTMLElement | null>(
-    typeof document !== "undefined" &&
-      document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null,
-  );
   const cat = getCategory(draft.type);
   const busy = saving || deleting;
-
-  useEffect(
-    () => () => {
-      returnFocusRef.current?.focus();
-    },
-    [],
-  );
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        if (!busy) onClose();
-        return;
-      }
-      keepFocusInDialog(event, dialogRef.current);
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [busy, onClose]);
 
   const setField = <K extends keyof RoutineRecord>(k: K, v: RoutineRecord[K]) =>
     setDraft((d) => ({ ...d, [k]: v }));
@@ -156,24 +99,16 @@ export function RecordModal({
   };
 
   return (
-    <div
-      className="modal-backdrop"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !busy) onClose();
+    <ModalDialog
+      busy={busy}
+      onClose={onClose}
+      aria-labelledby="record-modal-title"
+      aria-describedby="record-modal-description"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!confirmingDelete) void save();
       }}
     >
-      <form
-        className="modal"
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="record-modal-title"
-        aria-describedby="record-modal-description"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!confirmingDelete) void save();
-        }}
-      >
         <div className="modal-h">
           <div className="cluster">
             <div
@@ -387,7 +322,6 @@ export function RecordModal({
             </>
           )}
         </div>
-      </form>
-    </div>
+    </ModalDialog>
   );
 }

@@ -943,6 +943,27 @@ button:focus-visible {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+.timeline-filter-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.timeline-caregiver-filter {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+.timeline-caregiver-filter select {
+  max-width: 150px;
+  padding: 7px 28px 7px 9px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  font: inherit;
+}
 .section-h {
   font-family: "Instrument Serif", serif;
   font-size: 22px;
@@ -1049,6 +1070,11 @@ button:focus-visible {
   font-size: 12px;
   color: var(--ink-2);
   margin-top: 2px;
+}
+.tl-attribution {
+  margin-top: 4px;
+  color: var(--ink-3);
+  font-size: 11px;
 }
 .tl-chips {
   display: flex;
@@ -1196,10 +1222,21 @@ button:focus-visible {
 }
 .next-up-row {
   display: flex;
+  width: 100%;
   gap: 10px;
   align-items: center;
   padding: 8px 0;
   border-bottom: 1px dashed var(--line-2);
+  border-radius: 6px;
+  color: inherit;
+  text-align: left;
+  transition:
+    background 0.12s ease,
+    padding 0.12s ease;
+}
+.next-up-row:hover {
+  padding-inline: 6px;
+  background: var(--card-2);
 }
 .next-up-row:last-child {
   border-bottom: 0;
@@ -1214,11 +1251,17 @@ button:focus-visible {
 }
 .next-up-body {
   flex: 1;
+  min-width: 0;
 }
 .next-up-title {
+  display: block;
+  overflow: hidden;
   font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .next-up-sub {
+  display: block;
   font-size: 12px;
   color: var(--ink-3);
 }
@@ -1815,6 +1858,42 @@ button:focus-visible {
 .invite-hint {
   color: #94a3b8;
 }
+.pending-invites {
+  display: grid;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+.pending-invites h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+.pending-invite-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pending-invite-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.pending-invite-row > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.pending-invite-row span {
+  color: var(--muted);
+}
 .export-control {
   display: grid;
   gap: 4px;
@@ -1984,6 +2063,37 @@ button:focus-visible {
 .handoff-row {
   align-items: start;
 }
+.handoff-header {
+  align-items: flex-start;
+  gap: 12px;
+}
+.handoff-actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.handoff-actions .btn {
+  padding-inline: 10px;
+}
+.handoff-feedback {
+  margin: -2px 0 8px;
+  color: var(--ok);
+  font-size: 12px;
+}
+.handoff-feedback.is-error {
+  color: var(--warn);
+}
+@media (max-width: 620px) {
+  .handoff-header {
+    flex-direction: column;
+  }
+  .handoff-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+}
 .quick-actions {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -2044,6 +2154,10 @@ button:focus-visible {
   }
   .timeline-result-count {
     text-align: left;
+  }
+  .timeline-filter-actions {
+    width: 100%;
+    justify-content: space-between;
   }
   .now-panel {
     grid-template-columns: 1fr;

@@ -30,7 +30,7 @@ beforeEach(async () => {
   adminId = Number(
     db
       .prepare(
-        "INSERT INTO users (email, password_hash, display_name, created_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO users (email, password_hash, display_name, role, created_at) VALUES (?, ?, ?, 'administrator', ?)",
       )
       .run("admin@example.com", hash, "Admin", new Date().toISOString())
       .lastInsertRowid,
@@ -219,7 +219,7 @@ describe("POST /api/invites", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns code + url when authed", async () => {
+  it("returns code + url when authenticated as an administrator", async () => {
     const login = await post("/api/auth/login", {
       email: "admin@example.com",
       password: "hunter22",
@@ -228,10 +228,12 @@ describe("POST /api/invites", () => {
     const res = await post("/api/invites", {}, cookie);
     expect(res.status).toBe(200);
     const json = (await res.json()) as {
+      id: string;
       code: string;
       url: string;
       expiresAt: string;
     };
+    expect(json.id).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(json.url).toBe(`${ORIGIN}/signup?code=${json.code}`);
   });
 });

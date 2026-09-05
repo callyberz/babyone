@@ -11,6 +11,7 @@ import {
   recordsKey,
   syncKey,
   useHouseholdSync,
+  useUpdateRecord,
 } from "./queries";
 
 afterEach(() => vi.restoreAllMocks());
@@ -144,5 +145,27 @@ describe("useHouseholdSync", () => {
     expect(
       qc.getQueryData<RoutineRecord[]>(recordsKey)?.map((item) => item.id),
     ).toEqual([3, 2, 1]);
+  });
+});
+
+describe("useUpdateRecord", () => {
+  it("reorders the timeline immediately when an edited timestamp moves", async () => {
+    const qc = new QueryClient({
+      defaultOptions: { mutations: { retry: false } },
+    });
+    const earlier = record(1, "Earlier");
+    const later = record(2, "Later");
+    qc.setQueryData(recordsKey, [later, earlier]);
+    const moved = { ...earlier, at: "2026-08-13T12:00:00.000Z" };
+    vi.spyOn(api, "updateRecord").mockResolvedValue(moved);
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client: qc }, children);
+    const { result } = renderHook(() => useUpdateRecord(), { wrapper });
+
+    await result.current.mutateAsync(moved);
+
+    expect(
+      qc.getQueryData<RoutineRecord[]>(recordsKey)?.map((item) => item.id),
+    ).toEqual([1, 2]);
   });
 });

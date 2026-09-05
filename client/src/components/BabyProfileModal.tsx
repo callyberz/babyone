@@ -1,38 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { validateBaby } from "@babyone/contracts";
 import type { Baby } from "../types";
 import { Icon } from "./icons";
-
-const FOCUSABLE =
-  'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
-
-function keepFocusInDialog(
-  event: KeyboardEvent,
-  dialog: HTMLElement | null,
-): void {
-  if (event.key !== "Tab" || !dialog) return;
-  const focusable = Array.from(
-    dialog.querySelectorAll<HTMLElement>(FOCUSABLE),
-  );
-  if (focusable.length === 0) {
-    event.preventDefault();
-    dialog.focus();
-    return;
-  }
-  const first = focusable[0];
-  const last = focusable[focusable.length - 1];
-  const active = document.activeElement;
-  if (!dialog.contains(active) || !focusable.includes(active as HTMLElement)) {
-    event.preventDefault();
-    (event.shiftKey ? last : first).focus();
-  } else if (event.shiftKey && active === first) {
-    event.preventDefault();
-    last.focus();
-  } else if (!event.shiftKey && active === last) {
-    event.preventDefault();
-    first.focus();
-  }
-}
+import { ModalDialog } from "./ModalDialog";
 
 export function BabyProfileModal({
   baby,
@@ -49,33 +19,6 @@ export function BabyProfileModal({
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const dialogRef = useRef<HTMLFormElement>(null);
-  const returnFocusRef = useRef<HTMLElement | null>(
-    typeof document !== "undefined" &&
-      document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null,
-  );
-
-  useEffect(
-    () => () => {
-      returnFocusRef.current?.focus();
-    },
-    [],
-  );
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        if (!saving) onClose();
-        return;
-      }
-      keepFocusInDialog(event, dialogRef.current);
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [onClose, saving]);
 
   const candidate: Baby = {
     ...draft,
@@ -109,24 +52,16 @@ export function BabyProfileModal({
   };
 
   return (
-    <div
-      className="modal-backdrop"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !saving) onClose();
+    <ModalDialog
+      busy={saving}
+      onClose={onClose}
+      aria-labelledby="baby-profile-modal-title"
+      aria-describedby="baby-profile-modal-description"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void save();
       }}
     >
-      <form
-        className="modal"
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="baby-profile-modal-title"
-        aria-describedby="baby-profile-modal-description"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void save();
-        }}
-      >
         <div className="modal-h">
           <h2 id="baby-profile-modal-title">Baby profile</h2>
           <button
@@ -236,7 +171,6 @@ export function BabyProfileModal({
             {saving ? "Saving…" : "Save profile"}
           </button>
         </div>
-      </form>
-    </div>
+    </ModalDialog>
   );
 }

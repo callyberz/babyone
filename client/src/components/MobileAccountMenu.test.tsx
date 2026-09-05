@@ -144,6 +144,9 @@ describe("MobileAccountMenu", () => {
     expect(
       screen.queryByRole("button", { name: "Export household data" }),
     ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Invite caregiver" }),
+    ).not.toBeInTheDocument();
   });
 
   it("reports an export failure and enables another attempt", async () => {

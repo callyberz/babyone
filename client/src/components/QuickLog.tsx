@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { RoutineRecordDraft } from "@babyone/contracts";
 import { useCreateRecord, useDeleteRecord } from "../queries";
 import { createRequestId } from "../requestId";
 import { categories } from "../types";
 import { Icon } from "./icons";
+import { ModalDialog } from "./ModalDialog";
 
 type ModalKind = "bottle" | "nursing" | "sleep" | "play" | "meds";
 type InstantKind = "wet" | "dirty" | "happy" | "fussy";
@@ -241,14 +242,6 @@ function QuickLogModal({
       ? medication.trim().length > 0
       : Number.isFinite(value) && value > 0;
 
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !saving) onClose();
-    };
-    document.addEventListener("keydown", closeOnEscape);
-    return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [onClose, saving]);
-
   const changed = (update: () => void) => {
     setAttempt(null);
     update();
@@ -334,23 +327,16 @@ function QuickLogModal({
   }[kind];
 
   return (
-    <div
-      className="modal-backdrop"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !saving) onClose();
+    <ModalDialog
+      busy={saving}
+      onClose={onClose}
+      aria-labelledby="quick-log-modal-title"
+      aria-describedby="quick-log-modal-description"
+      onSubmit={(event) => {
+        event.preventDefault();
+        submit();
       }}
     >
-      <form
-        className="modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="quick-log-modal-title"
-        aria-describedby="quick-log-modal-description"
-        onSubmit={(event) => {
-          event.preventDefault();
-          submit();
-        }}
-      >
         <div className="modal-h">
           <h2 id="quick-log-modal-title">{heading}</h2>
           <button
@@ -403,8 +389,8 @@ function QuickLogModal({
             <input
               id="quick-amount"
               type="number"
-              min="0.1"
-              step={kind === "bottle" ? "0.5" : "1"}
+              min="0"
+              step="any"
               value={amount}
               onChange={(event) => changed(() => setAmount(event.target.value))}
               autoFocus
@@ -466,7 +452,6 @@ function QuickLogModal({
             {saving ? "Logging…" : error && attempt ? "Retry log" : "Log now"}
           </button>
         </div>
-      </form>
-    </div>
+    </ModalDialog>
   );
 }

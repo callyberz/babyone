@@ -89,8 +89,34 @@ export function useRevokeSession() {
   });
 }
 
+export const pendingInvitesKey = ["pending-invites"] as const;
+
+export function usePendingInvites(enabled: boolean) {
+  return useQuery({
+    queryKey: pendingInvitesKey,
+    queryFn: () =>
+      api.listPendingInvites().then((response) => response.invites),
+    enabled,
+    staleTime: 0,
+  });
+}
+
 export function useCreateInvite() {
-  return useMutation({ mutationFn: api.createInvite });
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.createInvite,
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: pendingInvitesKey }),
+  });
+}
+
+export function useRevokeInvite() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.revokeInvite,
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: pendingInvitesKey }),
+  });
 }
 
 export const caregiversKey = ["caregivers"] as const;

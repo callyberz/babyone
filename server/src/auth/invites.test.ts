@@ -5,8 +5,11 @@ import {
   createInvite,
   consumeInvite,
   cleanupExpiredInvites,
+  invitePublicId,
   isInviteAvailable,
   INVITE_TTL_MS,
+  listPendingInvites,
+  revokePendingInvite,
 } from "./invites.js";
 
 let db: Database.Database;
@@ -34,6 +37,8 @@ describe("invites", () => {
   it("creates a unique 32-char base64url code with 24h TTL", () => {
     const inv = createInvite(db, userId);
     expect(inv.code).toMatch(/^[A-Za-z0-9_-]{32,}$/);
+    expect(inv.id).toBe(invitePublicId(inv.code));
+    expect(inv.id).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(new Date(inv.expiresAt).getTime() - Date.now()).toBeGreaterThan(
       INVITE_TTL_MS - 5000,
     );
@@ -75,5 +80,41 @@ describe("invites", () => {
     expect(
       db.prepare("SELECT COUNT(*) AS c FROM invites").get() as { c: number },
     ).toEqual({ c: 1 });
+  });
+
+  it("lists only live unused invites without exposing their codes", () => {
+    const pending = createInvite(db, userId);
+    const consumed = createInvite(db, userId);
+    expect(consumeInvite(db, consumed.code, userId)).toBe(true);
+    db.prepare(
+      "INSERT INTO invites (code, created_by, created_at, expires_at) VALUES ('expired', ?, ?, ?)",
+    ).run(userId, new Date(0).toISOString(), new Date(0).toISOString());
+
+    const listed = listPendingInvites(db);
+
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toEqual({
+      id: pending.id,
+      createdAt: expect.any(String),
+      expiresAt: pending.expiresAt,
+      createdBy: { id: userId, displayName: "A" },
+    });
+    expect(JSON.stringify(listed)).not.toContain(pending.code);
+    expect(JSON.stringify(listed)).not.toContain(consumed.code);
+    expect(JSON.stringify(listed)).not.toContain("expired");
+  });
+
+  it("revokes only a still-live unused invite by public fingerprint", () => {
+    const pending = createInvite(db, userId);
+    const consumed = createInvite(db, userId);
+    expect(consumeInvite(db, consumed.code, userId)).toBe(true);
+
+    expect(revokePendingInvite(db, pending.id)).toBe(true);
+    expect(isInviteAvailable(db, pending.code)).toBe(false);
+    expect(revokePendingInvite(db, pending.id)).toBe(false);
+    expect(revokePendingInvite(db, consumed.id)).toBe(false);
+    expect(
+      db.prepare("SELECT 1 FROM invites WHERE code = ?").get(consumed.code),
+    ).toBeTruthy();
   });
 });
